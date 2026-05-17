@@ -56,17 +56,17 @@ pip install pyinstaller colorama
 **3. 准备 FFmpeg**
 
 方式 A - 指定本地路径（推荐）：
-修改 `bulid.py` 中的 `FFMPEG_SOURCE = r"C:\ffmpeg\bin"`
+修改 `build.py` 中的 `FFMPEG_SOURCE = r"C:\ffmpeg\bin"`
 
 方式 B - 手动放置：
 创建 `ffmpeg/` 目录，放入 `ffmpeg.exe`、`ffprobe.exe` 及相关 DLL
 
 方式 C - 自动下载：
-设置 `bulid.py` 中 `AUTO_DOWNLOAD = True`
+设置 `build.py` 中 `AUTO_DOWNLOAD = True`
 
 **4. 执行打包**
 ```bash
-python bulid.py
+python build.py
 ```
 生成的 `MediaConverter/` 文件夹位于项目根目录。
 
@@ -120,7 +120,7 @@ python bulid.py
 ```
 MediaConverter/
 ├── converter.py           # 主程序源码
-├── bulid.py               # 打包脚本
+├── build.py               # 打包脚本
 ├── ffmpeg/                # FFmpeg 二进制文件
 │   ├── ffmpeg.exe
 │   ├── ffprobe.exe
