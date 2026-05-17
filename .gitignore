@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.spec
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 打包输出
+MediaConverter/
+
+# 备份文件
+*副本*
+*- 副本*
+
+# 编译产物
+*.exe
+
+# FFmpeg 二进制（通过 build.py 下载/复制）
+ffmpeg/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
