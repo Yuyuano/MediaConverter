@@ -6,6 +6,8 @@ import shutil
 import re
 import json
 import time
+import signal
+import atexit
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Tuple, Dict
@@ -129,9 +131,11 @@ class ConversionQueue:
         self.queue.put(task)
         return task['id']
 
-    def cancel_current_task(self):
-        """标记取消当前任务"""
+    def cancel_current_task(self, converter=None):
+        """标记取消当前任务并终止子进程"""
         self.cancel_current = True
+        if converter and converter._current_process:
+            converter._cleanup_process()
         print("\n[*] 正在取消当前任务...")
 
     def process_queue(self, converter) -> List[bool]:
@@ -196,6 +200,27 @@ class MediaConverter:
         self.ffmpeg_path = self._find_ffmpeg()
         self.ffprobe_path = self._find_ffprobe() if self.ffmpeg_path else None
         self.history = HistoryManager()
+        self._current_process = None
+        atexit.register(self._cleanup_process)
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def _cleanup_process(self):
+        """终止正在运行的ffmpeg子进程"""
+        if self._current_process and self._current_process.poll() is None:
+            try:
+                self._current_process.terminate()
+                self._current_process.wait(timeout=3)
+            except Exception:
+                try:
+                    self._current_process.kill()
+                except Exception:
+                    pass
+
+    def _signal_handler(self, signum, frame):
+        """信号处理：先杀子进程再退出"""
+        self._cleanup_process()
+        sys.exit(0)
 
     def _find_ffmpeg(self):
         """查找ffmpeg"""
@@ -209,7 +234,8 @@ class MediaConverter:
             if p.exists() and self._verify(str(p)):
                 return str(p)
         try:
-            result = subprocess.run(['where', 'ffmpeg'], capture_output=True, text=True)
+            result = subprocess.run(['where', 'ffmpeg'], capture_output=True, text=True,
+                                    encoding='utf-8', errors='replace')
             if result.returncode == 0:
                 path = result.stdout.strip().split('\n')[0]
                 if self._verify(path):
@@ -226,7 +252,8 @@ class MediaConverter:
     def _verify(self, path):
         try:
             r = subprocess.run([path, '-version'], capture_output=True,
-                               text=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
+                               text=True, encoding='utf-8', errors='replace',
+                               timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
             return r.returncode == 0 and 'version' in r.stdout
         except:
             return False
@@ -238,6 +265,7 @@ class MediaConverter:
             input("\n按回车退出...")
             sys.exit(1)
         v = subprocess.run([self.ffmpeg_path, '-version'], capture_output=True, text=True,
+                           encoding='utf-8', errors='replace',
                            creationflags=subprocess.CREATE_NO_WINDOW)
         _c("[+]", f"FFmpeg: {v.stdout.split()[2] if v.stdout else 'OK'}", Fore.GREEN)
         return True
@@ -257,6 +285,7 @@ class MediaConverter:
         ]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True,
+                               encoding='utf-8', errors='replace',
                                creationflags=subprocess.CREATE_NO_WINDOW)
             info = {}
             for line in r.stdout.split('\n'):
@@ -531,14 +560,16 @@ class MediaConverter:
         return cmd
 
     def _run_ffmpeg(self, cmd, input_file, output_file, output_ext, opts, add_to_history):
+        process = None
         try:
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                universal_newlines=True,
+                text=True, encoding='utf-8', errors='replace',
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
+            self._current_process = process
             for line in process.stdout:
                 line = line.strip()
                 if any(x in line for x in ['frame=', 'size=', 'time=', 'out_time_ms']):
@@ -557,6 +588,8 @@ class MediaConverter:
         except Exception as e:
             _c("[!]", f"错误: {e}", Fore.RED)
             return False
+        finally:
+            self._current_process = None
 
     def convert(self, input_file: str, output_file: str, opts: Optional[ConvertOptions] = None, add_to_history: bool = True) -> bool:
         """通用转换接口"""
@@ -910,7 +943,9 @@ def _interconvert(conv):
             cmd = [conv.ffmpeg_path, '-ss', time_point, '-i', f, '-vframes', '1']
             cmd.extend(conv._build_image_opts(f'.{fmt}', opts))
             cmd.append(output)
-            subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
+            conv._current_process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
+            conv._current_process.wait()
+            conv._current_process = None
             _c("[+]", "提取完成", Fore.GREEN)
     elif sub == '2':
         f = get_file("拖入图片文件: ")
@@ -930,7 +965,9 @@ def _interconvert(conv):
             if opts.quality is not None:
                 cmd.extend(['-crf', str(opts.quality)])
             cmd.append(output)
-            subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
+            conv._current_process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
+            conv._current_process.wait()
+            conv._current_process = None
             _c("[+]", "生成完成", Fore.GREEN)
     input("\n回车继续...")
 
