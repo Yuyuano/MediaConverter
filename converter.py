@@ -39,6 +39,7 @@ class ConvertOptions:
     output_dir: Optional[str] = None
     start_time: Optional[str] = None
     trim_duration: Optional[str] = None
+    use_gpu: bool = False
 
 
 class HistoryManager:
@@ -201,6 +202,8 @@ class MediaConverter:
         self.ffprobe_path = self._find_ffprobe() if self.ffmpeg_path else None
         self.history = HistoryManager()
         self._current_process = None
+        self.gpu_type = None
+        self._hwaccel = None
         atexit.register(self._cleanup_process)
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -221,6 +224,58 @@ class MediaConverter:
         """信号处理：先杀子进程再退出"""
         self._cleanup_process()
         sys.exit(0)
+
+    def _detect_gpu(self):
+        """检测可用的GPU硬件编码器"""
+        if not self.ffmpeg_path:
+            return
+        try:
+            r = subprocess.run([self.ffmpeg_path, '-encoders'], capture_output=True,
+                               text=True, encoding='utf-8', errors='replace',
+                               timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+            output = r.stdout
+            if 'h264_nvenc' in output:
+                self.gpu_type = 'nvidia'
+                self._hwaccel = 'cuda'
+            elif 'h264_amf' in output:
+                self.gpu_type = 'amd'
+                self._hwaccel = 'd3d11va'
+            elif 'h264_qsv' in output:
+                self.gpu_type = 'intel'
+                self._hwaccel = 'qsv'
+        except Exception:
+            pass
+
+    def _get_gpu_encoder(self, ext: str) -> Optional[str]:
+        """返回当前GPU对应的视频编码器"""
+        gpu_encoders = {
+            'nvidia': 'h264_nvenc',
+            'amd': 'h264_amf',
+            'intel': 'h264_qsv',
+        }
+        gpu_codec = gpu_encoders.get(self.gpu_type)
+        if gpu_codec and ext in ('.mp4', '.mov', '.mkv', '.m4v', '.flv', '.avi'):
+            return gpu_codec
+        return None
+
+    def _get_gpu_quality_args(self, quality: int) -> List[str]:
+        """GPU编码器的质量参数"""
+        if self.gpu_type == 'nvidia':
+            return ['-cq', str(quality)]
+        elif self.gpu_type == 'amd':
+            return ['-qp_i', str(quality), '-qp_p', str(quality)]
+        elif self.gpu_type == 'intel':
+            return ['-global_quality', str(quality)]
+        return ['-crf', str(quality)]
+
+    def _map_gpu_preset(self, preset: str) -> str:
+        """将CPU预设映射到GPU预设"""
+        if self.gpu_type == 'nvidia':
+            p_map = {'ultrafast': 'p1', 'superfast': 'p2', 'veryfast': 'p3',
+                     'faster': 'p4', 'fast': 'p4', 'medium': 'p5',
+                     'slow': 'p6', 'slower': 'p7', 'veryslow': 'p7'}
+            return p_map.get(preset, 'p4')
+        return preset
 
     def _find_ffmpeg(self):
         """查找ffmpeg"""
@@ -268,6 +323,12 @@ class MediaConverter:
                            encoding='utf-8', errors='replace',
                            creationflags=subprocess.CREATE_NO_WINDOW)
         _c("[+]", f"FFmpeg: {v.stdout.split()[2] if v.stdout else 'OK'}", Fore.GREEN)
+        self._detect_gpu()
+        if self.gpu_type:
+            gpu_name = {'nvidia': 'NVIDIA (NVENC)', 'amd': 'AMD (AMF)', 'intel': 'Intel (QSV)'}
+            _c("[+]", f"GPU 加速: {gpu_name.get(self.gpu_type, self.gpu_type)}", Fore.GREEN)
+        else:
+            _c("[*]", "未检测到 GPU 硬件编码器，将使用 CPU 软解", Fore.YELLOW)
         return True
 
     def get_info(self, filepath: str) -> dict:
@@ -378,6 +439,11 @@ class MediaConverter:
                 print(f"    帧率: {opts.fps} fps")
             if opts.codec:
                 print(f"    编码器: {opts.codec}")
+            elif opts.use_gpu and self.gpu_type:
+                gpu_codec = self._get_gpu_encoder(output_ext)
+                if gpu_codec:
+                    gpu_label = {'nvidia': 'NVIDIA NVENC', 'amd': 'AMD AMF', 'intel': 'Intel QSV'}
+                    print(f"    编码器: {gpu_codec} ({gpu_label.get(self.gpu_type, 'GPU')})")
             if opts.preset:
                 print(f"    预设: {opts.preset}")
         else:
@@ -458,6 +524,7 @@ class MediaConverter:
         """构建视频编码参数"""
         args = []
         args.extend(self._build_filter(opts))
+        ext = output_ext.lower()
         codec_map = {
             '.mp4': 'libx264', '.mov': 'libx264', '.m4v': 'libx264',
             '.avi': 'libxvid',
@@ -467,10 +534,16 @@ class MediaConverter:
             '.flv': 'libx264',
             '.gif': 'gif',
         }
+        if opts.use_gpu and self.gpu_type:
+            gpu_codec = self._get_gpu_encoder(ext)
+            if gpu_codec:
+                for k in list(codec_map.keys()):
+                    if k not in ('.webm', '.wmv', '.gif'):
+                        codec_map[k] = gpu_codec
         if opts.codec:
             args.extend(['-c:v', opts.codec])
-        elif output_ext.lower() in codec_map:
-            if output_ext.lower() == '.gif':
+        elif ext in codec_map:
+            if ext == '.gif':
                 args.extend([
                     '-vf',
                     f"fps={opts.fps or 30},scale={opts.width or 480}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse",
@@ -478,13 +551,19 @@ class MediaConverter:
                 ])
                 return args
             else:
-                args.extend(['-c:v', codec_map[output_ext.lower()]])
+                args.extend(['-c:v', codec_map[ext]])
         if opts.quality is not None:
-            args.extend(['-crf', str(opts.quality)])
+            if opts.use_gpu and self.gpu_type and self._get_gpu_encoder(ext):
+                args.extend(self._get_gpu_quality_args(opts.quality))
+            else:
+                args.extend(['-crf', str(opts.quality)])
         elif opts.bitrate:
             args.extend(['-b:v', opts.bitrate])
         if opts.preset:
-            args.extend(['-preset', opts.preset])
+            if opts.use_gpu and self.gpu_type and self._get_gpu_encoder(ext):
+                args.extend(['-preset', self._map_gpu_preset(opts.preset)])
+            else:
+                args.extend(['-preset', opts.preset])
         if opts.audio_bitrate:
             args.extend(['-c:a', 'aac', '-b:a', opts.audio_bitrate])
         else:
@@ -546,17 +625,25 @@ class MediaConverter:
 
     def _build_img_to_video_cmd(self, input_file, opts):
         duration = opts.trim_duration or "5"
+        codec = opts.codec
+        if not codec and opts.use_gpu:
+            codec = self._get_gpu_encoder('.mp4')
+        if not codec:
+            codec = 'libx264'
         cmd = [
             self.ffmpeg_path,
             '-loop', '1',
             '-i', input_file,
-            '-c:v', opts.codec or 'libx264',
+            '-c:v', codec,
             '-t', str(duration),
             '-pix_fmt', 'yuv420p'
         ]
         cmd.extend(self._build_filter(opts))
         if opts.quality is not None:
-            cmd.extend(['-crf', str(opts.quality)])
+            if opts.use_gpu and self.gpu_type:
+                cmd.extend(self._get_gpu_quality_args(opts.quality))
+            else:
+                cmd.extend(['-crf', str(opts.quality)])
         return cmd
 
     def _run_ffmpeg(self, cmd, input_file, output_file, output_ext, opts, add_to_history):
@@ -606,6 +693,8 @@ class MediaConverter:
         is_video_output = output_ext in self.VIDEO_EXTS or output_ext == '.gif'
 
         cmd = [self.ffmpeg_path]
+        if is_video_input and is_video_output and opts.use_gpu and self._hwaccel:
+            cmd.extend(['-hwaccel', self._hwaccel])
         if opts.start_time:
             cmd.extend(['-ss', opts.start_time])
         if opts.trim_duration:
@@ -644,6 +733,7 @@ class MediaConverter:
         }
         default_opts = presets.get(target_format, ConvertOptions())
         default_opts.output_dir = opts.output_dir
+        default_opts.use_gpu = opts.use_gpu
         if opts.quality is not None:
             default_opts.quality = opts.quality
         if opts.preset:
@@ -694,7 +784,8 @@ class MediaConverter:
             bitrate=f"{target_bits_safe // 1024}k",
             audio_bitrate="128k",
             preset='slow',
-            output_dir=opts.output_dir
+            output_dir=opts.output_dir,
+            use_gpu=opts.use_gpu
         )
         print(f"\n[*] 目标大小: {target_size_mb}MB")
         print(f"[*] 计算码率: {comp_opts.bitrate}")
@@ -773,11 +864,14 @@ def get_trim_options(opts: ConvertOptions):
             opts.trim_duration = dur
 
 
-def advanced_options() -> ConvertOptions:
+def advanced_options(gpu_available: bool = False) -> ConvertOptions:
     """交互式高级参数设置"""
     opts = ConvertOptions()
     print("\n[高级参数设置] (直接回车使用默认)")
     opts.output_dir = get_output_dir()
+    if gpu_available:
+        use_gpu = input("启用 GPU 硬件加速? (Y/N, 默认N): ").strip().upper()
+        opts.use_gpu = use_gpu == 'Y' or use_gpu == 'YES'
     size = input("输出尺寸 (如 1920x1080, 1080p, 720p 或宽度): ").strip()
     if size:
         w, h = parse_size(size)
@@ -824,7 +918,7 @@ def batch_convert_mode(conv: MediaConverter):
     target_format = formats[int(fmt_choice)-1] if fmt_choice.isdigit() and 1 <= int(fmt_choice) <= 5 else 'mp4'
     print("\n是否设置高级参数? (Y/N): ", end='')
     if input().strip().upper() == 'Y':
-        opts = advanced_options()
+        opts = advanced_options(conv.gpu_type is not None)
     else:
         opts = ConvertOptions()
     workers = input("\n并发数 (1-4, 默认2): ").strip()
@@ -843,6 +937,9 @@ def _quick_video_handler(fmt):
             conv.preview_file_info(f)
             output_dir = get_output_dir()
             opts = ConvertOptions(output_dir=output_dir)
+            if conv.gpu_type and fmt in ('mp4', 'mov', 'mkv', 'avi', 'flv'):
+                use_gpu = input("\n启用 GPU 硬件加速? (Y/N, 默认N): ").strip().upper()
+                opts.use_gpu = use_gpu == 'Y' or use_gpu == 'YES'
             get_trim_options(opts)
             conv.quick_video_convert(f, fmt, opts)
         input("\n回车继续...")
@@ -901,11 +998,12 @@ def _advanced_video(conv):
         print("[!] 不支持的格式")
         input("\n回车继续...")
         return
-    opts = advanced_options()
+    opts = advanced_options(conv.gpu_type is not None)
     output = conv._get_output_path(f, "custom", fmt, opts)
     if conv.preview_conversion_params(f, output, opts):
         conv.convert(f, output, opts)
     input("\n回车继续...")
+
 
 
 def _advanced_image(conv):
@@ -915,12 +1013,11 @@ def _advanced_image(conv):
         return
     print("\n输出格式: jpg, png, webp, bmp, gif, tiff")
     fmt = input("输入格式: ").strip().lower()
-    opts = advanced_options()
+    opts = advanced_options(conv.gpu_type is not None)
     output = conv._get_output_path(f, "custom", fmt, opts)
     if conv.preview_conversion_params(f, output, opts):
         conv.convert(f, output, opts)
     input("\n回车继续...")
-
 
 def _interconvert(conv):
     print("\n1. 视频 -> 图片 (提取帧)")
@@ -935,7 +1032,7 @@ def _interconvert(conv):
         fmt = input("输入格式: ").strip().lower()
         time_point = input("提取时间点 (秒，默认1): ").strip() or "1"
         output_dir = get_output_dir()
-        opts = advanced_options()
+        opts = advanced_options(conv.gpu_type is not None)
         opts.output_dir = output_dir
         base = os.path.splitext(os.path.basename(f))[0]
         output = os.path.join(output_dir, f"{base}_frame.{fmt}") if output_dir else f"{os.path.splitext(f)[0]}_frame.{fmt}"
@@ -953,17 +1050,22 @@ def _interconvert(conv):
             return
         duration = input("视频时长(秒，默认5): ").strip() or "5"
         output_dir = get_output_dir()
-        opts = advanced_options()
+        opts = advanced_options(conv.gpu_type is not None)
         opts.output_dir = output_dir
         opts.fps = opts.fps or 30
         base = os.path.splitext(os.path.basename(f))[0]
         output = os.path.join(output_dir, f"{base}_video.mp4") if output_dir else f"{os.path.splitext(f)[0]}_video.mp4"
         if conv.preview_conversion_params(f, output, opts):
-            cmd = [conv.ffmpeg_path, '-loop', '1', '-i', f, '-c:v', 'libx264', '-t', str(duration), '-pix_fmt', 'yuv420p']
+            gpu_codec = conv._get_gpu_encoder('.mp4') if opts.use_gpu else None
+            vcodec = gpu_codec or 'libx264'
+            cmd = [conv.ffmpeg_path, '-loop', '1', '-i', f, '-c:v', vcodec, '-t', str(duration), '-pix_fmt', 'yuv420p']
             if opts.width or opts.height:
                 cmd.extend(['-vf', f"scale={opts.width or -1}:{opts.height or -1}"])
             if opts.quality is not None:
-                cmd.extend(['-crf', str(opts.quality)])
+                if opts.use_gpu and gpu_codec:
+                    cmd.extend(conv._get_gpu_quality_args(opts.quality))
+                else:
+                    cmd.extend(['-crf', str(opts.quality)])
             cmd.append(output)
             conv._current_process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
             conv._current_process.wait()
@@ -978,6 +1080,9 @@ def _compress(conv):
         size = input("目标大小(MB，默认50): ").strip() or "50"
         output_dir = get_output_dir()
         opts = ConvertOptions(output_dir=output_dir)
+        if conv.gpu_type:
+            use_gpu = input("启用 GPU 硬件加速? (Y/N, 默认N): ").strip().upper()
+            opts.use_gpu = use_gpu == 'Y' or use_gpu == 'YES'
         conv.compress_media(f, int(size), opts)
     input("\n回车继续...")
 
