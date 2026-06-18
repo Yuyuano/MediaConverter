@@ -1,0 +1,60 @@
+import os
+import json
+import logging
+from pathlib import Path
+from dataclasses import asdict
+from datetime import datetime
+from typing import Optional, List, Dict
+
+from .options import ConvertOptions
+
+logger = logging.getLogger('MediaConverter')
+
+
+class HistoryManager:
+    """转换历史记录管理器"""
+
+    def __init__(self):
+        self.app_name = "FFmpegConverter"
+        local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))
+        self.history_dir = Path(local_app_data) / self.app_name
+        self.history_file = self.history_dir / "history.json"
+        self.max_history = 20
+
+    def _ensure_dir(self):
+        self.history_dir.mkdir(parents=True, exist_ok=True)
+
+    def load_history(self) -> List[Dict]:
+        if not self.history_file.exists():
+            return []
+        try:
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('recent', [])
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning(f"加载历史记录失败: {e}")
+            return []
+
+    def save_history(self, history: List[Dict]):
+        self._ensure_dir()
+        try:
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump({'recent': history}, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            logger.error(f"保存历史记录失败: {e}")
+
+    def add_record(self, input_file: str, output_format: str, options: ConvertOptions):
+        history = self.load_history()
+        record = {
+            'file': str(input_file),
+            'format': output_format,
+            'options': {k: v for k, v in asdict(options).items() if v is not None},
+            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        history = [h for h in history if h['file'] != str(input_file)]
+        history.insert(0, record)
+        history = history[:self.max_history]
+        self.save_history(history)
+
+    def get_recent(self, count: int = 10) -> List[Dict]:
+        return self.load_history()[:count]
