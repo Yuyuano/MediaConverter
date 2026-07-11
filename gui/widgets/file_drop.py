@@ -4,15 +4,12 @@ from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget, QFileDialog, QPushButt
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
+from core.constants import ALL_MEDIA_EXTS
+
 
 class FileDropWidget(QWidget):
-    """文件拖拽区域"""
-    file_selected = pyqtSignal(str)  # 文件路径
-
-    VIDEO_EXTS = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.ts', '.m2ts'}
-    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tiff', '.tif', '.ico'}
-    AUDIO_EXTS = {'.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a', '.wma'}
-    ALL_EXTS = VIDEO_EXTS | IMAGE_EXTS | AUDIO_EXTS
+    file_selected = pyqtSignal(str)
+    info_requested = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -32,7 +29,16 @@ class FileDropWidget(QWidget):
         btn_layout = QHBoxLayout()
         self.btn_file = QPushButton("选择文件")
         self.btn_file.clicked.connect(self._select_file)
+        self.btn_info = QPushButton("信息")
+        self.btn_info.clicked.connect(self._request_info)
+        self.btn_info.hide()
+        self.btn_clear = QPushButton("清除")
+        self.btn_clear.clicked.connect(self.clear)
+        self.btn_clear.hide()
         btn_layout.addWidget(self.btn_file)
+        btn_layout.addWidget(self.btn_info)
+        btn_layout.addWidget(self.btn_clear)
+        btn_layout.addStretch()
 
         self.file_info_label = QLabel("")
         self.file_info_label.setObjectName("fileInfo")
@@ -44,24 +50,37 @@ class FileDropWidget(QWidget):
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+            urls = event.mimeData().urls()
+            for url in urls:
+                path = url.toLocalFile()
+                if path and Path(path).suffix.lower() in ALL_MEDIA_EXTS:
+                    event.acceptProposedAction()
+                    return
+            event.ignore()
 
     def dropEvent(self, event: QDropEvent):
         urls = event.mimeData().urls()
         if urls:
             path = urls[0].toLocalFile()
-            self._set_file(path)
+            self.set_file(path)
 
     def _select_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择媒体文件")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择媒体文件",
+            filter="媒体文件 (*.mp4 *.avi *.mkv *.mov *.webm *.wmv *.flv *.m4v *.jpg *.jpeg *.png *.bmp *.webp *.gif *.tiff *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.wma);;所有文件 (*.*)"
+        )
         if path:
-            self._set_file(path)
+            self.set_file(path)
 
-    def _set_file(self, path: str):
+    def _request_info(self):
+        if self._filepath:
+            self.info_requested.emit(self._filepath)
+
+    def set_file(self, path: str):
         if not os.path.isfile(path):
             return
         ext = Path(path).suffix.lower()
-        if ext not in self.ALL_EXTS:
+        if ext not in ALL_MEDIA_EXTS:
             self.file_info_label.setText(f"不支持的格式: {ext}")
             return
         self._filepath = path
@@ -69,6 +88,8 @@ class FileDropWidget(QWidget):
         size_mb = os.path.getsize(path) / (1024 * 1024)
         self.drop_label.setText(f"已选择: {name}")
         self.file_info_label.setText(f"大小: {size_mb:.1f} MB")
+        self.btn_info.show()
+        self.btn_clear.show()
         self.file_selected.emit(path)
 
     @property
@@ -79,9 +100,11 @@ class FileDropWidget(QWidget):
         self._filepath = None
         self.drop_label.setText("拖入文件到此处，或点击下方按钮选择")
         self.file_info_label.setText("")
+        self.btn_info.hide()
+        self.btn_clear.hide()
+        self.file_selected.emit('')
 
     def set_file_info(self, info: dict):
-        """更新文件详细信息（由主窗口调用）"""
         if not info.get('valid'):
             return
         parts = []
@@ -94,6 +117,9 @@ class FileDropWidget(QWidget):
             elif w >= 1920: res_desc = ' (1080p)'
             elif w >= 1280: res_desc = ' (720p)'
             parts.append(f"分辨率: {w}×{h}{res_desc}")
+        fps = info.get('fps', 0)
+        if fps:
+            parts.append(f"帧率: {fps} FPS")
         dur = info.get('duration', 0)
         if dur:
             if dur < 60:

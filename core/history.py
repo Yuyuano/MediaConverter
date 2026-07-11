@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 import logging
 from pathlib import Path
 from dataclasses import asdict
@@ -10,16 +11,18 @@ from .options import ConvertOptions
 
 logger = logging.getLogger('MediaConverter')
 
+_local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))
+HISTORY_DIR = Path(_local_app_data) / 'FFmpegConverter'
+
 
 class HistoryManager:
     """转换历史记录管理器"""
 
     def __init__(self):
-        self.app_name = "FFmpegConverter"
-        local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))
-        self.history_dir = Path(local_app_data) / self.app_name
+        self.history_dir = HISTORY_DIR
         self.history_file = self.history_dir / "history.json"
         self.max_history = 20
+        self._lock = threading.Lock()
 
     def _ensure_dir(self):
         self.history_dir.mkdir(parents=True, exist_ok=True)
@@ -44,17 +47,32 @@ class HistoryManager:
             logger.error(f"保存历史记录失败: {e}")
 
     def add_record(self, input_file: str, output_format: str, options: ConvertOptions):
-        history = self.load_history()
-        record = {
-            'file': str(input_file),
-            'format': output_format,
-            'options': {k: v for k, v in asdict(options).items() if v is not None},
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        history = [h for h in history if h['file'] != str(input_file)]
-        history.insert(0, record)
-        history = history[:self.max_history]
-        self.save_history(history)
+        with self._lock:
+            history = self.load_history()
+            record = {
+                'file': str(input_file),
+                'format': output_format,
+                'options': {k: v for k, v in asdict(options).items() if v is not None},
+                'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            history = [h for h in history if not (h.get('file') == str(input_file) and h.get('format') == output_format)]
+            history.insert(0, record)
+            history = history[:self.max_history]
+            self.save_history(history)
 
     def get_recent(self, count: int = 10) -> List[Dict]:
-        return self.load_history()[:count]
+        with self._lock:
+            return self.load_history()[:count]
+
+    def delete_record(self, index: int) -> bool:
+        with self._lock:
+            history = self.load_history()
+            if 0 <= index < len(history):
+                history.pop(index)
+                self.save_history(history)
+                return True
+            return False
+
+    def clear_history(self):
+        with self._lock:
+            self.save_history([])

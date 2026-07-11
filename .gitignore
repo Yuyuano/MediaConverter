@@ -18,6 +18,7 @@ venv/
 
 # 打包输出
 MediaConverter/
+MediaConverter.zip
 
 # 备份文件
 *副本*

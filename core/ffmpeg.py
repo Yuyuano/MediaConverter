@@ -38,7 +38,8 @@ class FFmpegManager:
         try:
             result = subprocess.run(
                 ['where', 'ffmpeg'], capture_output=True, text=True,
-                encoding='utf-8', errors='replace'
+                encoding='utf-8', errors='replace',
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             if result.returncode == 0:
                 path = result.stdout.strip().split('\n')[0]
@@ -54,7 +55,19 @@ class FFmpegManager:
         if self.ffmpeg_path:
             base = Path(self.ffmpeg_path).parent
             probe = base / 'ffprobe.exe'
-            self.ffprobe_path = str(probe) if probe.exists() else None
+            if probe.exists():
+                try:
+                    r = subprocess.run(
+                        [str(probe), '-version'], capture_output=True,
+                        text=True, encoding='utf-8', errors='replace',
+                        timeout=5, creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    if r.returncode == 0 and 'version' in r.stdout:
+                        self.ffprobe_path = str(probe)
+                        return
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            self.ffprobe_path = None
 
     def _verify(self, path: str) -> bool:
         try:
@@ -74,14 +87,13 @@ class FFmpegManager:
             r = subprocess.run(
                 [self.ffmpeg_path, '-version'], capture_output=True, text=True,
                 encoding='utf-8', errors='replace',
-                creationflags=subprocess.CREATE_NO_WINDOW
+                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW
             )
-            return r.stdout.split()[2] if r.stdout else 'unknown'
-        except (OSError, subprocess.SubprocessError):
+            return r.stdout.split()[2] if r.stdout and len(r.stdout.split()) > 2 else 'unknown'
+        except (OSError, subprocess.SubprocessError, IndexError):
             return 'unknown'
 
     def detect_gpu(self) -> Tuple[Optional[str], Optional[str]]:
-        """检测 GPU 硬件编码器，返回 (gpu_type, hwaccel)"""
         if not self.ffmpeg_path:
             return None, None
         try:
@@ -91,11 +103,11 @@ class FFmpegManager:
                 timeout=10, creationflags=subprocess.CREATE_NO_WINDOW
             )
             output = r.stdout
-            if 'h264_nvenc' in output:
+            if 'h264_nvenc' in output or 'hevc_nvenc' in output or 'av1_nvenc' in output:
                 self.gpu_type, self._hwaccel = 'nvidia', 'cuda'
-            elif 'h264_amf' in output:
+            elif 'h264_amf' in output or 'hevc_amf' in output or 'av1_amf' in output:
                 self.gpu_type, self._hwaccel = 'amd', 'd3d11va'
-            elif 'h264_qsv' in output:
+            elif 'h264_qsv' in output or 'hevc_qsv' in output or 'av1_qsv' in output:
                 self.gpu_type, self._hwaccel = 'intel', 'qsv'
         except (OSError, subprocess.SubprocessError):
             pass

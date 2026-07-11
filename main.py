@@ -11,8 +11,12 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 
-# 日志配置
-LOG_DIR = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))) / 'FFmpegConverter'
+from core.constants import APP_VERSION
+from core.history import HISTORY_DIR
+
+
+# 日志配置 — 复用 history 模块的目录
+LOG_DIR = HISTORY_DIR
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     filename=str(LOG_DIR / 'converter.log'),
@@ -34,7 +38,7 @@ def load_stylesheet() -> str:
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("MediaConverter")
-    app.setApplicationVersion("3.0")
+    app.setApplicationVersion(APP_VERSION)
 
     # 应用图标
     icon_path = ROOT / "ico" / "Miku.ico"

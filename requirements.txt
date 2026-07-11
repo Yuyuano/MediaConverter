@@ -1,2 +1,3 @@
 PyQt6>=6.5
 pyinstaller>=5.0
+# colorama: only needed by legacy backup/ modules, not core GUI

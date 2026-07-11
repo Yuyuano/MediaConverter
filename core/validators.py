@@ -1,9 +1,11 @@
 import os
+import re
+import logging
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
+logger = logging.getLogger('MediaConverter')
 
-# FFmpeg 安全参数白名单
 SAFE_FFMPEG_FLAGS = {
     '-movflags', '-pix_fmt', '-profile:v', '-level', '-tune',
     '-g', '-bf', '-refs', '-me_method', '-subq', '-trellis',
@@ -18,7 +20,6 @@ SAFE_FFMPEG_FLAGS = {
 
 
 def validate_extra_args(extra_args: Optional[List[str]]) -> List[str]:
-    """校验 extra_args 白名单，过滤危险参数"""
     if not extra_args:
         return []
     safe_args = []
@@ -31,37 +32,37 @@ def validate_extra_args(extra_args: Optional[List[str]]) -> List[str]:
                 i += 1
                 safe_args.append(extra_args[i])
         else:
-            print(f"[!] 已过滤不安全的 FFmpeg 参数: {arg}")
+            logger.warning(f"已过滤不安全的 FFmpeg 参数: {arg}")
         i += 1
     return safe_args
 
 
 def validate_output_dir(output_dir: Optional[str]) -> Optional[str]:
-    """验证输出目录路径安全性，拒绝路径遍历"""
     if not output_dir:
         return None
     try:
-        if '..' in output_dir.split(os.sep):
-            print(f"[!] 路径包含 '..'，已拒绝: {output_dir}")
+        normalized = output_dir.replace('/', os.sep)
+        if '..' in normalized.split(os.sep):
+            logger.warning(f"路径包含 '..'，已拒绝: {output_dir}")
             return None
         resolved = Path(output_dir).resolve()
         return str(resolved)
     except (OSError, ValueError) as e:
-        print(f"[!] 无效路径: {e}")
+        logger.error(f"无效路径: {e}")
         return None
 
 
-def parse_size(size_str: str) -> tuple:
-    """解析尺寸字符串，返回 (width, height)"""
-    import re
+SIZE_PRESETS = {'1080p': (1920, 1080), '720p': (1280, 720), '480p': (854, 480), '4k': (3840, 2160)}
+
+
+def parse_size(size_str: str) -> Tuple[Optional[int], Optional[int]]:
     if not size_str:
         return None, None
     m = re.match(r'(\d+)[xX×](\d+)', size_str)
     if m:
         return int(m.group(1)), int(m.group(2))
-    presets = {'1080p': (1920, 1080), '720p': (1280, 720), '480p': (854, 480)}
-    if size_str.lower() in presets:
-        return presets[size_str.lower()]
+    if size_str.lower() in SIZE_PRESETS:
+        return SIZE_PRESETS[size_str.lower()]
     if size_str.isdigit():
         return int(size_str), None
     return None, None

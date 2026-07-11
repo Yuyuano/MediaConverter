@@ -1,3 +1,5 @@
+# 注意：此测试文件测试的是旧版 CLI 模块 converter.py（legacy）。
+# 新版 core/ 模块的测试位于 tests/ 目录下。
 import unittest
 import os
 import sys

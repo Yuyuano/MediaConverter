@@ -8,9 +8,10 @@ import sys
 from pathlib import Path
 
 # ============ 配置 ============
+from core.constants import APP_VERSION
 FFMPEG_SOURCE = os.environ.get(
     'FFMPEG_PATH',
-    r"C:\Users\windows\Downloads\ffmpeg-2026-02-04-git-627da1111c-full_build\bin"
+    ''
 )
 AUTO_DOWNLOAD = os.environ.get('FFMPEG_AUTO_DOWNLOAD', 'false').lower() == 'true'
 FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
@@ -57,7 +58,7 @@ def download_ffmpeg(target_dir: Path):
             return False
         print("[+] FFmpeg 准备完成")
         return True
-    except Exception as e:
+    except (OSError, urllib.error.URLError, zipfile.BadZipFile, ValueError) as e:
         print(f"\n[!] 下载失败: {e}")
         return False
 
@@ -70,7 +71,7 @@ def prepare_ffmpeg():
         print("[*] 使用现有的 ffmpeg 文件")
         return True
 
-    if os.path.exists(FFMPEG_SOURCE):
+    if FFMPEG_SOURCE and os.path.exists(FFMPEG_SOURCE):
         print(f"[*] 从 {FFMPEG_SOURCE} 复制 ffmpeg...")
         copied = []
         for f in ['ffmpeg.exe', 'ffprobe.exe']:
@@ -86,7 +87,7 @@ def prepare_ffmpeg():
             print(f"  [+] {len(dlls)} 个 DLL 文件")
         if 'ffmpeg.exe' in copied:
             return True
-        print("[!] 警告：未找到 ffmpeg.exe，请检查路径")
+        print("[!] 警告：未找到 ffmpeg.exe，请检查 FFMPEG_PATH 环境变量")
 
     if AUTO_DOWNLOAD:
         print("[*] 本地未找到，尝试自动下载...")
@@ -94,6 +95,7 @@ def prepare_ffmpeg():
             return True
 
     print("\n[!] 未找到 ffmpeg 源文件")
+    print("[!] 请设置 FFMPEG_PATH 环境变量指向 ffmpeg/bin 目录，或开启 FFMPEG_AUTO_DOWNLOAD=true")
     return False
 
 
@@ -115,7 +117,7 @@ def collect_binaries():
 
 def build():
     print("=" * 60)
-    print("  MediaConverter v3.0 - GUI 打包脚本")
+    print(f"  MediaConverter v{APP_VERSION} - GUI 打包脚本")
     print("=" * 60)
 
     if not prepare_ffmpeg():
@@ -126,24 +128,21 @@ def build():
 
     binaries = collect_binaries()
 
-    # 图标
-    icon_path = Path("ico") / "Miku.ico"
-    icon_arg = f'--icon={icon_path}' if icon_path.exists() else ''
+    icon_path = Path("icon.ico")
+    icon_arg = ['--icon', str(icon_path)] if icon_path.exists() else []
 
     args = [
         'main.py',
         '--name=MediaConverter',
-        '--windowed',           # 无控制台窗口
+        '--windowed',
         '--clean',
         '--noconfirm',
-        # 数据文件
         '--add-data=ico;ico',
         '--add-data=gui/styles;gui/styles',
-        '--add-data=core;core',
     ]
 
     if icon_arg:
-        args.append(icon_arg)
+        args.extend(icon_arg)
 
     for src, dst in binaries:
         args.append(f'--add-binary={src};{dst}')
@@ -153,7 +152,11 @@ def build():
     for arg in args:
         print(f"    {arg}")
 
-    PyInstaller.__main__.run(args)
+    try:
+        PyInstaller.__main__.run(args)
+    except RuntimeError as e:
+        print(f"\n[!] 打包错误: {e}")
+        return
 
     dist_dir = Path("dist") / "MediaConverter"
     exe_path = dist_dir / "MediaConverter.exe"
@@ -182,7 +185,7 @@ if __name__ == "__main__":
         build()
     except KeyboardInterrupt:
         print("\n\n[*] 用户取消")
-    except Exception as e:
+    except (OSError, RuntimeError) as e:
         print(f"\n[!] 错误: {e}")
         import traceback
         traceback.print_exc()

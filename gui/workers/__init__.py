@@ -1,1 +1,1 @@
-# GUI 后台线程模块
+# workers - QThread 封装层

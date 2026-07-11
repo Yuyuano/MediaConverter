@@ -1,1 +1,1 @@
-# GUI 控件模块
+# widgets - 可复用 UI 组件
