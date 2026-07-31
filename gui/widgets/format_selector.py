@@ -3,7 +3,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 
 class FormatSelector(QWidget):
-    format_changed = pyqtSignal(str, str)  # format_name, media_type
+    format_changed = pyqtSignal(str, str)
 
     VIDEO_FORMATS = ['MP4', 'AVI', 'MKV', 'MOV', 'WEBM', 'GIF']
     IMAGE_FORMATS = ['JPG', 'PNG', 'WEBP', 'BMP']
@@ -21,12 +21,12 @@ class FormatSelector(QWidget):
         section_label = QLabel(label)
         section_label.setObjectName("sectionLabel")
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         for fmt in formats:
             btn = QPushButton(fmt)
             btn.setCheckable(True)
             btn.setFixedHeight(32)
-            btn.setMinimumWidth(60)
+            btn.setMinimumWidth(58)
             btn.setObjectName("formatChip")
             btn.clicked.connect(lambda checked, b=btn: self._on_click(b))
             self._buttons[f'{prefix}_{fmt}'] = btn
@@ -37,7 +37,7 @@ class FormatSelector(QWidget):
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(6)
+        main_layout.setSpacing(8)
 
         mt = self._media_type
         if mt is None or mt == 'video':
@@ -89,10 +89,15 @@ class FormatSelector(QWidget):
         for key, media_type in prefixes:
             btn_key = f'{media_type}_{fmt_upper}'
             if btn_key in self._buttons:
-                self._buttons[btn_key].click()
+                btn = self._buttons[btn_key]
+                if btn is self._selected_btn:
+                    return
+                btn.click()
                 return
 
     def clear_selection(self):
+        if not self._selected_btn:
+            return
         self._selected = None
         self._selected_btn = None
         for btn in self._buttons.values():

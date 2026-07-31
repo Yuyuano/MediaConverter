@@ -1,6 +1,8 @@
 import os
 import json
+import sys
 import threading
+import tempfile
 import logging
 from pathlib import Path
 from dataclasses import asdict
@@ -8,20 +10,24 @@ from datetime import datetime
 from typing import Optional, List, Dict
 
 from .options import ConvertOptions
+from .constants import MAX_HISTORY_RECORDS
 
 logger = logging.getLogger('MediaConverter')
 
-_local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))
-HISTORY_DIR = Path(_local_app_data) / 'FFmpegConverter'
+
+
 
 
 class HistoryManager:
     """转换历史记录管理器"""
 
     def __init__(self):
-        self.history_dir = HISTORY_DIR
+        if getattr(sys, 'frozen', False):
+            self.history_dir = Path(sys.executable).parent / "history"
+        else:
+            self.history_dir = Path(__file__).parent.parent / "history"
         self.history_file = self.history_dir / "history.json"
-        self.max_history = 20
+        self.max_history = MAX_HISTORY_RECORDS
         self._lock = threading.Lock()
 
     def _ensure_dir(self):
@@ -33,25 +39,41 @@ class HistoryManager:
         try:
             with open(self.history_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get('recent', [])
-        except (json.JSONDecodeError, OSError, KeyError) as e:
+            if not isinstance(data, dict) or not isinstance(data.get('recent'), list):
+                logger.warning(f"历史记录结构异常，已重置: {self.history_file}")
+                return []
+            return data.get('recent', [])
+        except (json.JSONDecodeError, OSError, KeyError, AttributeError) as e:
             logger.warning(f"加载历史记录失败: {e}")
             return []
 
     def save_history(self, history: List[Dict]):
         self._ensure_dir()
+        tmp_fd = None
+        tmp_path = None
         try:
-            with open(self.history_file, 'w', encoding='utf-8') as f:
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(self.history_dir), suffix='.tmp', prefix='history_'
+            )
+            os.close(tmp_fd)
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump({'recent': history}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, str(self.history_file))
         except OSError as e:
             logger.error(f"保存历史记录失败: {e}")
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
-    def add_record(self, input_file: str, output_format: str, options: ConvertOptions):
+    def add_record(self, input_file: str, output_format: str, options: ConvertOptions, output_file: str = ''):
         with self._lock:
             history = self.load_history()
             record = {
                 'file': str(input_file),
                 'format': output_format,
+                'output': str(output_file) if output_file else '',
                 'options': {k: v for k, v in asdict(options).items() if v is not None},
                 'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }

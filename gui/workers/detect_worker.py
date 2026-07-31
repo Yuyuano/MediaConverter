@@ -11,7 +11,13 @@ class DetectWorker(QThread):
 
     def run(self):
         try:
+            if self.isInterruptionRequested():
+                self.detected.emit('', '')
+                return
             self.converter.init()
+            if self.isInterruptionRequested():
+                self.detected.emit('', '')
+                return
             gpu = self.converter.gpu_type or ''
             name = self.converter.gpu_name
             self.detected.emit(gpu, name)

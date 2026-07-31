@@ -6,6 +6,10 @@ dist/
 build/
 *.spec
 
+# 运行时数据（用户路径/隐私）
+history/
+ffmpeg.sha256
+
 # 虚拟环境
 .venv/
 venv/

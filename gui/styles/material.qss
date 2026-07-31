@@ -1,0 +1,612 @@
+/* ════════════════════════════════════════════════════════════
+   MediaConverter — Material Design 3 主题模板
+   所有颜色由 ThemeManager 通过 token 占位符注入（实色表面 +
+   预混合状态层，无 rgba 半透明叠加）。
+   注意：模板经 Python str.format() 渲染，字面花括号必须双写 {{ }}。
+   ════════════════════════════════════════════════════════════ */
+
+/* ── 根 ── */
+QMainWindow {{
+    background-color: {surface};
+}}
+
+QWidget#centralWidget {{
+    background-color: {surface};
+}}
+
+QWidget {{
+    background-color: transparent;
+    color: {on_surface};
+    font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC", sans-serif;
+    font-size: 13px;
+}}
+
+QToolTip {{
+    background-color: {popup_bg};
+    color: {on_surface};
+    border: 1px solid {outline_variant};
+    border-radius: 6px;
+    padding: 6px 10px;
+}}
+
+/* ── 滚动条 ── */
+QScrollBar:vertical {{
+    background: transparent;
+    width: 10px;
+    margin: 4px 2px 4px 2px;
+}}
+QScrollBar::handle:vertical {{
+    background: {scrollbar_handle};
+    min-height: 32px;
+    border-radius: 5px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {scrollbar_handle_hover};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    height: 0;
+    background: none;
+}}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 10px;
+    margin: 2px 4px 2px 4px;
+}}
+QScrollBar::handle:horizontal {{
+    background: {scrollbar_handle};
+    min-width: 32px;
+    border-radius: 5px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: {scrollbar_handle_hover};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    width: 0;
+    background: none;
+}}
+
+/* ── 卡片容器（MD3 elevated card, 16px） ── */
+QFrame#card {{
+    background-color: {card_bg};
+    border: 1px solid {card_border};
+    border-radius: 16px;
+}}
+
+/* ── 通用按钮（中性填充，胶囊形） ── */
+QPushButton {{
+    background-color: {btn_bg};
+    border: none;
+    border-radius: 18px;
+    padding: 8px 18px;
+    color: {on_surface};
+    font-size: 13px;
+    min-height: 20px;
+}}
+QPushButton:hover {{
+    background-color: {btn_hover};
+}}
+QPushButton:pressed {{
+    background-color: {btn_pressed};
+}}
+QPushButton:disabled {{
+    background-color: {btn_disabled_bg};
+    color: {btn_disabled_text};
+}}
+
+/* ── 可选中按钮（MD3 filter chip 回退样式） ── */
+QPushButton[checkable="true"] {{
+    background-color: {chip_bg};
+    border: 1px solid {chip_border};
+    border-radius: 8px;
+    padding: 6px 14px;
+    color: {on_surface_variant};
+}}
+QPushButton[checkable="true"]:hover {{
+    background-color: {chip_hover};
+    color: {on_surface};
+}}
+QPushButton[checkable="true"]:checked {{
+    background-color: {chip_checked_bg};
+    border-color: {chip_checked_bg};
+    color: {on_secondary_container};
+    font-weight: bold;
+}}
+QPushButton[checkable="true"]:checked:hover {{
+    background-color: {chip_checked_hover};
+}}
+
+/* ── 主转换按钮（MD3 filled button, 20px 胶囊） ── */
+QPushButton#convertBtn {{
+    background-color: {primary};
+    color: {on_primary};
+    font-size: 14px;
+    font-weight: bold;
+    border: none;
+    border-radius: 20px;
+    padding: 10px 32px;
+    min-width: 140px;
+    min-height: 24px;
+}}
+QPushButton#convertBtn:hover {{
+    background-color: {primary_hover};
+}}
+QPushButton#convertBtn:pressed {{
+    background-color: {primary_pressed};
+}}
+QPushButton#convertBtn:disabled {{
+    background-color: {btn_disabled_bg};
+    color: {btn_disabled_text};
+}}
+
+/* ── 参数预设按钮（tonal 小按钮） ── */
+QPushButton#presetBtn {{
+    background-color: {preset_bg};
+    border: none;
+    border-radius: 8px;
+    padding: 3px 12px;
+    font-size: 12px;
+    color: {on_surface_variant};
+    min-height: 24px;
+}}
+QPushButton#presetBtn:hover {{
+    background-color: {preset_hover};
+    color: {on_surface};
+}}
+QPushButton#presetBtn:checked {{
+    background-color: {preset_checked_bg};
+    color: {on_secondary_container};
+    font-weight: bold;
+}}
+QPushButton#presetBtn:checked:hover {{
+    background-color: {preset_checked_hover};
+}}
+
+/* ── 格式芯片按钮（MD3 filter chip） ── */
+QPushButton#formatChip {{
+    background-color: {chip_bg};
+    border: 1px solid {chip_border};
+    border-radius: 8px;
+    padding: 6px 16px;
+    font-size: 12px;
+    color: {on_surface_variant};
+    min-width: 52px;
+    min-height: 22px;
+}}
+QPushButton#formatChip:hover {{
+    background-color: {chip_hover};
+    color: {on_surface};
+}}
+QPushButton#formatChip:checked {{
+    background-color: {chip_checked_bg};
+    border-color: {chip_checked_bg};
+    color: {on_secondary_container};
+    font-weight: bold;
+}}
+QPushButton#formatChip:checked:hover {{
+    background-color: {chip_checked_hover};
+}}
+
+/* ── 表格行内操作按钮 ── */
+QPushButton#tableActionBtn {{
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 13px;
+}}
+
+/* ── 模板变量小按钮 ── */
+QPushButton#varBtn {{
+    padding: 0 10px;
+    font-size: 11px;
+    border-radius: 12px;
+}}
+
+/* ── 输入框（MD3 filled text field：顶圆角 + 底部指示线） ── */
+QLineEdit, QSpinBox, QDoubleSpinBox {{
+    background-color: {input_bg};
+    border: none;
+    border-bottom: 1px solid {on_surface_variant};
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 6px 12px;
+    color: {on_surface};
+    selection-background-color: {primary};
+    selection-color: {on_primary};
+    min-height: 22px;
+}}
+QLineEdit:hover:!focus, QSpinBox:hover:!focus, QDoubleSpinBox:hover:!focus {{
+    background-color: {input_hover_bg};
+}}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
+    border-bottom: 2px solid {primary};
+    padding-bottom: 5px;
+}}
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
+    background-color: {input_disabled_bg};
+    color: {input_disabled_text};
+    border-bottom-color: {input_disabled_text};
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    border: none;
+    background: transparent;
+    width: 18px;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    border: none;
+    background: transparent;
+    width: 18px;
+    subcontrol-origin: padding;
+    subcontrol-position: bottom right;
+}}
+
+/* ── 下拉框（与输入框同语言） ── */
+QComboBox {{
+    background-color: {input_bg};
+    border: none;
+    border-bottom: 1px solid {on_surface_variant};
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 6px 12px;
+    color: {on_surface};
+    min-height: 22px;
+}}
+QComboBox:hover:!focus {{
+    background-color: {input_hover_bg};
+}}
+QComboBox:focus {{
+    border-bottom: 2px solid {primary};
+    padding-bottom: 5px;
+}}
+QComboBox:disabled {{
+    background-color: {input_disabled_bg};
+    color: {input_disabled_text};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 24px;
+    border-top-right-radius: 6px;
+}}
+QComboBox::drop-down:hover {{
+    background-color: {input_hover_bg};
+}}
+QComboBox::down-arrow {{
+    image: none;
+    width: 0;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {popup_bg};
+    border: 1px solid {outline_variant};
+    border-radius: 10px;
+    padding: 4px;
+    outline: none;
+    color: {on_surface};
+    selection-background-color: {table_selected};
+    selection-color: {on_surface};
+}}
+
+/* ── GroupBox ── */
+QGroupBox {{
+    background-color: transparent;
+    border: 1px solid {divider};
+    border-radius: 12px;
+    margin-top: 14px;
+    padding: 14px 10px 10px 10px;
+    font-size: 12px;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: {primary};
+    font-weight: bold;
+}}
+
+/* ── 复选框（MD3 checkbox） ── */
+QCheckBox {{
+    color: {on_surface};
+    spacing: 8px;
+    min-height: 22px;
+}}
+QCheckBox::indicator {{
+    width: 18px;
+    height: 18px;
+    border: 2px solid {on_surface_variant};
+    border-radius: 3px;
+    background: transparent;
+}}
+QCheckBox::indicator:hover {{
+    border-color: {primary};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {primary};
+    border-color: {primary};
+}}
+QCheckBox:disabled {{
+    color: {btn_disabled_text};
+}}
+QCheckBox::indicator:disabled {{
+    border-color: {btn_disabled_text};
+}}
+
+/* ── 滑块 ── */
+QSlider::groove:horizontal {{
+    background-color: {slider_track};
+    height: 4px;
+    border-radius: 2px;
+}}
+QSlider::handle:horizontal {{
+    background-color: {primary};
+    width: 20px;
+    height: 20px;
+    margin: -8px 0;
+    border-radius: 10px;
+}}
+QSlider::handle:horizontal:hover {{
+    background-color: {slider_handle_hover};
+}}
+QSlider::sub-page:horizontal {{
+    background-color: {primary};
+    border-radius: 2px;
+}}
+QSlider:disabled::groove:horizontal {{
+    background-color: {slider_track_disabled};
+}}
+QSlider:disabled::handle:horizontal {{
+    background-color: {outline_variant};
+}}
+QSlider:disabled::sub-page:horizontal {{
+    background-color: {outline_variant};
+}}
+
+/* ── 进度条 ── */
+QProgressBar {{
+    background-color: {progress_track};
+    border: none;
+    border-radius: 12px;
+    text-align: center;
+    color: {on_surface};
+    height: 24px;
+    font-size: 12px;
+    font-weight: bold;
+}}
+QProgressBar::chunk {{
+    background-color: {primary_container};
+    border-radius: 12px;
+}}
+
+/* ── 日志面板 ── */
+QPlainTextEdit, QTextEdit {{
+    background-color: {log_bg};
+    border: 1px solid {divider_subtle};
+    border-radius: 12px;
+    color: {on_surface_variant};
+    font-family: "Consolas", "Cascadia Code", "Courier New", monospace;
+    font-size: 12px;
+    padding: 8px;
+    selection-background-color: {primary};
+    selection-color: {on_primary};
+}}
+QPlainTextEdit:focus, QTextEdit:focus {{
+    border-color: {primary};
+}}
+
+/* ── 表格 ── */
+QTableWidget {{
+    background-color: {table_bg};
+    border: 1px solid {card_border};
+    border-radius: 12px;
+    gridline-color: {table_gridline};
+    color: {on_surface};
+    outline: none;
+}}
+QTableWidget::item {{
+    padding: 6px 8px;
+    border: none;
+}}
+QTableWidget::item:selected {{
+    background-color: {table_selected};
+    color: {on_surface};
+}}
+QHeaderView::section {{
+    background-color: {table_header_bg};
+    color: {on_surface_variant};
+    border: none;
+    border-bottom: 1px solid {divider};
+    padding: 8px;
+    font-weight: bold;
+    font-size: 12px;
+}}
+
+/* ── 文件拖放区（动态属性 state 驱动三态） ── */
+QLabel#dropLabel {{
+    border: 2px dashed {outline_variant};
+    border-radius: 16px;
+    padding: 20px;
+    color: {on_surface_dim};
+    font-size: 14px;
+    background-color: transparent;
+}}
+QLabel#dropLabel[state="drag"] {{
+    border: 2px solid {primary};
+    border-radius: 16px;
+    background-color: {drop_drag_bg};
+    color: {primary};
+}}
+QLabel#dropLabel[state="selected"] {{
+    border: 2px solid {drop_selected_border};
+    border-radius: 16px;
+    background-color: {drop_selected_bg};
+    color: {on_surface};
+}}
+
+/* ── 文件类型图标徽标 ── */
+QLabel#typeIcon {{
+    background-color: {type_icon_bg};
+    border-radius: 8px;
+    color: {primary};
+    font-size: 18px;
+}}
+
+/* ── 通用标签 ── */
+QLabel#sectionLabel {{
+    color: {primary};
+    font-weight: bold;
+    font-size: 12px;
+    background-color: transparent;
+    padding: 2px 0;
+}}
+QLabel#fileInfo {{
+    color: {on_surface_variant};
+    font-size: 12px;
+    background-color: transparent;
+}}
+QLabel#pageTitle {{
+    color: {primary};
+    font-size: 16px;
+    font-weight: bold;
+    background-color: transparent;
+}}
+QLabel#dialogHeader {{
+    color: {primary};
+    font-size: 13px;
+    font-weight: bold;
+    background-color: transparent;
+}}
+QLabel#dialogHint {{
+    color: {on_surface_dim};
+    font-size: 11px;
+    background-color: transparent;
+}}
+QLabel#dialogValue {{
+    color: {on_surface};
+    font-size: 13px;
+    background-color: transparent;
+}}
+QLabel#etaLabel {{
+    color: {success};
+    font-size: 12px;
+    font-weight: bold;
+    background-color: transparent;
+}}
+QLabel#emptyLabel {{
+    color: {on_surface_dim};
+    font-size: 14px;
+    padding: 40px;
+    border: 1px dashed {outline_variant};
+    border-radius: 12px;
+    background-color: transparent;
+}}
+
+/* ── 侧边栏（MD3 Navigation Drawer：胶囊激活项） ── */
+QWidget#sidebar {{
+    background-color: {sidebar_bg};
+    border-right: 1px solid {divider_subtle};
+}}
+QPushButton#sidebarBtn {{
+    background-color: transparent;
+    border: none;
+    border-radius: 22px;
+    text-align: left;
+    padding: 12px 18px;
+    margin: 2px 12px;
+    color: {on_surface_variant};
+    font-size: 13px;
+    font-weight: normal;
+}}
+QPushButton#sidebarBtn:hover {{
+    background-color: {sidebar_btn_hover};
+    color: {on_surface};
+}}
+QPushButton#sidebarBtn:checked {{
+    background-color: {sidebar_btn_active};
+    color: {on_secondary_container};
+    font-weight: bold;
+}}
+QPushButton#sidebarBtn:checked:hover {{
+    background-color: {sidebar_btn_active_hover};
+}}
+QLabel#sidebarTitle {{
+    color: {primary};
+    font-size: 15px;
+    font-weight: bold;
+    padding: 0;
+    background-color: transparent;
+}}
+QLabel#sidebarVersion {{
+    color: {on_surface_dim};
+    font-size: 11px;
+    background-color: transparent;
+}}
+QWidget#sidebarSep {{
+    background-color: {divider};
+}}
+
+/* ── 对话框 ── */
+QDialog {{
+    background-color: {dialog_bg};
+}}
+
+/* ── 列表 ── */
+QListWidget {{
+    background-color: {list_bg};
+    border: 1px solid {card_border};
+    border-radius: 12px;
+    color: {on_surface};
+    outline: none;
+    alternate-background-color: {table_header_bg};
+}}
+QListWidget::item {{
+    padding: 8px 12px;
+    border-bottom: 1px solid {table_gridline};
+}}
+QListWidget::item:selected {{
+    background-color: {list_selected};
+    color: {on_surface};
+}}
+QListWidget::item:hover:!selected {{
+    background-color: {list_hover};
+}}
+
+/* ── 状态栏 ── */
+QStatusBar {{
+    background-color: {statusbar_bg};
+    color: {on_surface_variant};
+    border-top: 1px solid {divider_subtle};
+    font-size: 12px;
+    min-height: 26px;
+}}
+QStatusBar::item {{
+    border: none;
+}}
+
+/* ── 消息框 ── */
+QMessageBox {{
+    background-color: {dialog_bg};
+}}
+QMessageBox QLabel {{
+    color: {on_surface};
+    font-size: 13px;
+}}
+QMessageBox QPushButton {{
+    min-width: 84px;
+    min-height: 28px;
+}}
+
+/* ── 节折叠按钮 ── */
+QPushButton#sectionToggle {{
+    background-color: transparent;
+    border: none;
+    border-radius: 10px;
+    text-align: left;
+    padding: 0 14px;
+    font-weight: bold;
+    font-size: 13px;
+    color: {primary};
+    min-height: 36px;
+}}
+QPushButton#sectionToggle:hover {{
+    background-color: {section_toggle_hover};
+}}

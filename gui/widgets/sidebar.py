@@ -7,10 +7,10 @@ class Sidebar(QWidget):
     page_changed = pyqtSignal(int)
 
     NAV_ITEMS = [
-        (0, "video",   "📹  视频转换"),
-        (1, "image",   "🖼️  图片转换"),
-        (2, "audio",   "🎵  音频转换"),
-        (3, "history", "📋  历史记录"),
+        (0, "video",   "▶  视频转换"),
+        (1, "image",   "◆  图片转换"),
+        (2, "audio",   "♪  音频转换"),
+        (3, "history", "☰  历史记录"),
     ]
 
     def __init__(self):
@@ -18,6 +18,7 @@ class Sidebar(QWidget):
         self._buttons = {}
         self._current = 0
         self.setObjectName("sidebar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(180)
         self._init_ui()
 
@@ -33,8 +34,9 @@ class Sidebar(QWidget):
         layout.addWidget(title)
 
         sep = QWidget()
+        sep.setObjectName("sidebarSep")
+        sep.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         sep.setFixedHeight(1)
-        sep.setStyleSheet("background-color: #313244;")
         layout.addWidget(sep)
 
         for idx, key, text in self.NAV_ITEMS:

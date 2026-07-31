@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QComboBox, QSpinBox, QGroupBox, QMessageBox, QProgressBar,
-    QAbstractItemView, QCheckBox, QPlainTextEdit
+    QAbstractItemView, QCheckBox, QTextEdit, QLineEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
@@ -14,7 +14,21 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from core.options import ConvertOptions
 from core.converter import MediaConverter
 from core.constants import ALL_MEDIA_EXTS, VIDEO_EXTS, IMAGE_EXTS, AUDIO_EXTS
+from core.validators import validate_output_dir
+from gui.theme import format_log_html
 from gui.workers.convert_worker import BatchWorker
+
+
+def _unique_path(path: str) -> str:
+    p = Path(path)
+    if not p.exists():
+        return str(p)
+    stem, ext = p.stem, p.suffix
+    for i in range(1, 10000):
+        cand = p.with_name(f"{stem}_{i}{ext}")
+        if not cand.exists():
+            return str(cand)
+    return str(p)
 
 
 class BatchDialog(QDialog):
@@ -24,16 +38,18 @@ class BatchDialog(QDialog):
         self._converter = converter
         self._files = []
         self._worker = None
+        self._pending_worker = None
         self._is_running = False
         self._format_combos = []
         self.setWindowTitle("批量转换")
-        self.setMinimumSize(700, 500)
-        self.resize(800, 600)
+        self.setMinimumSize(720, 520)
+        self.resize(800, 620)
         self.setAcceptDrops(True)
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
 
         file_group = QGroupBox("文件列表 (拖入文件或点击添加)")
         file_layout = QVBoxLayout(file_group)
@@ -48,16 +64,21 @@ class BatchDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setDefaultSectionSize(36)
         file_layout.addWidget(self.table)
 
         btn_row = QHBoxLayout()
-        self.btn_add = QPushButton("添加文件")
+        self.btn_add = QPushButton("+ 添加文件")
+        self.btn_add.setFixedHeight(30)
         self.btn_add.clicked.connect(self._add_files)
-        self.btn_add_folder = QPushButton("添加文件夹")
+        self.btn_add_folder = QPushButton("+ 添加文件夹")
+        self.btn_add_folder.setFixedHeight(30)
         self.btn_add_folder.clicked.connect(self._add_folder)
         self.btn_remove = QPushButton("移除选中")
+        self.btn_remove.setFixedHeight(30)
         self.btn_remove.clicked.connect(self._remove_selected)
         self.btn_clear = QPushButton("清空")
+        self.btn_clear.setFixedHeight(30)
         self.btn_clear.clicked.connect(self._clear_all)
         btn_row.addWidget(self.btn_add)
         btn_row.addWidget(self.btn_add_folder)
@@ -96,14 +117,26 @@ class BatchDialog(QDialog):
         row2.addWidget(self.input_template, 1)
 
         self.btn_batch_output = QPushButton("输出目录...")
-        self.btn_batch_output.setMinimumHeight(30)
+        self.btn_batch_output.setFixedHeight(30)
         self.btn_batch_output.clicked.connect(self._select_batch_output)
         row2.addWidget(self.btn_batch_output)
 
         self.label_batch_output = QLabel("与源文件同目录")
-        self.label_batch_output.setStyleSheet("color: #888; font-size: 11px;")
+        self.label_batch_output.setObjectName("dialogHint")
         row2.addWidget(self.label_batch_output, 1)
         settings_layout.addLayout(row2)
+
+        template_btns = QHBoxLayout()
+        template_btns.setSpacing(4)
+        template_btns.addWidget(QLabel("插入变量:"))
+        for var in ["{原名}", "{格式}", "{序号}", "{日期}", "{原路径}"]:
+            btn = QPushButton(var)
+            btn.setFixedHeight(24)
+            btn.setObjectName("varBtn")
+            btn.clicked.connect(lambda checked, v=var: self._insert_template_var(v))
+            template_btns.addWidget(btn)
+        template_btns.addStretch()
+        settings_layout.addLayout(template_btns)
 
         layout.addWidget(settings_group)
 
@@ -112,13 +145,14 @@ class BatchDialog(QDialog):
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
 
-        self.log_view = QPlainTextEdit()
+        self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumHeight(120)
         self.log_view.setPlaceholderText("转换日志将显示在这里...")
         layout.addWidget(self.log_view)
 
         self.label_status = QLabel("就绪")
+        self.label_status.setObjectName("dialogHint")
         layout.addWidget(self.label_status)
 
         action_row = QHBoxLayout()
@@ -146,6 +180,13 @@ class BatchDialog(QDialog):
     def dropEvent(self, event: QDropEvent):
         paths = [u.toLocalFile() for u in event.mimeData().urls()]
         self._add_paths(paths)
+
+    def _insert_template_var(self, var: str):
+        cursor = self.input_template.cursorPosition()
+        text = self.input_template.text()
+        new_text = text[:cursor] + var + text[cursor:]
+        self.input_template.setText(new_text)
+        self.input_template.setCursorPosition(cursor + len(var))
 
     def _add_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "选择文件")
@@ -227,6 +268,7 @@ class BatchDialog(QDialog):
         output_dir_override = getattr(self, '_batch_output_dir', '')
 
         tasks = []
+        seen_outputs = set()
         for i, f in enumerate(self._files):
             p = Path(f)
             fmt = self._format_combos[i].currentText()
@@ -242,10 +284,24 @@ class BatchDialog(QDialog):
 
             stem = self._render_template(template, p.stem, fmt, i + 1, str(p.parent))
             if output_dir_override:
-                output = str(Path(output_dir_override) / f"{stem}.{fmt}")
+                validated = validate_output_dir(output_dir_override)
+                if validated is None:
+                    QMessageBox.warning(self, "提示", f"无效输出目录: {output_dir_override}")
+                    return
+                out_dir = Path(validated)
+                try:
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    QMessageBox.warning(self, "提示", f"无法创建输出目录: {output_dir_override}\n{e}")
+                    return
+                output = str(out_dir / f"{stem}.{fmt}")
             else:
                 output = str(p.parent / f"{stem}.{fmt}")
-            tasks.append((f, output, copy.copy(base_opts)))
+            if output in seen_outputs:
+                output = str(Path(output).parent / f"{stem}_{i + 1}.{fmt}")
+            output = _unique_path(output)
+            seen_outputs.add(output)
+            tasks.append((f, output, copy.deepcopy(base_opts)))
 
         self.btn_start.setEnabled(False)
         self.btn_cancel.setEnabled(True)
@@ -285,6 +341,7 @@ class BatchDialog(QDialog):
         result = result.replace("{序号}", f"{index:03d}")
         result = result.replace("{日期}", datetime.now().strftime("%Y%m%d"))
         result = result.replace("{原路径}", source_dir)
+        result = result.replace('..', '_').replace('/', '_').replace('\\', '_')
         return result
 
     def _on_task_done(self, task_id, input_file, success):
@@ -295,20 +352,26 @@ class BatchDialog(QDialog):
         done = sum(1 for i in range(self.table.rowCount())
                    if self.table.item(i, 3) and self.table.item(i, 3).text() in ("成功", "失败"))
         total = self.table.rowCount()
-        self.progress_bar.setValue(done)
+        if total > 0:
+            overall_pct = int(done * 100 / total)
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(overall_pct)
         self.label_status.setText(f"进度: {done}/{total}")
 
     def _on_progress_pct(self, pct: int):
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(pct)
+        pass
 
     def _append_log(self, lvl: str, msg: str):
-        prefix = {'info': '[+]', 'error': '[!]', 'warning': '[*]'}.get(lvl, '[*]')
-        self.log_view.appendPlainText(f"{prefix} {msg}")
+        cursor = self.log_view.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        cursor.insertHtml(format_log_html(lvl, msg))
+        cursor.insertBlock()
         sb = self.log_view.verticalScrollBar()
         sb.setValue(sb.maximum())
 
     def _on_all_done(self, success_count, total):
+        if not self._is_running:
+            return
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self._set_idle()
@@ -326,14 +389,32 @@ class BatchDialog(QDialog):
 
     def _cancel_batch(self):
         if self._worker and self._worker.isRunning():
+            self._is_running = False
+            self._worker.requestInterruption()
             self._worker.cancel()
+            if not self._worker.wait(10000):
+                self.label_status.setText("正在停止后台任务，请稍候...")
+                return
             self._worker = None
             self._set_idle()
             self.label_status.setText("已取消")
 
     def closeEvent(self, event):
         if self._worker and self._worker.isRunning():
+            self._is_running = False
+            try:
+                self._worker.log.disconnect()
+                self._worker.progress.disconnect()
+                self._worker.progress_pct.disconnect()
+                self._worker.eta.disconnect()
+                self._worker.task_done.disconnect()
+                self._worker.all_done.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            self._worker.requestInterruption()
             self._worker.cancel()
-            self._worker.wait(3000)
-            self._worker = None
+            if not self._worker.wait(10000):
+                self._pending_worker = self._worker
+                self._worker.finished.connect(self._pending_worker.deleteLater)
+        self._worker = None
         event.accept()

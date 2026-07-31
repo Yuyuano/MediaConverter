@@ -4,6 +4,7 @@ import shutil
 import os
 import zipfile
 import urllib.request
+import urllib.error
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ FFMPEG_SOURCE = os.environ.get(
     ''
 )
 AUTO_DOWNLOAD = os.environ.get('FFMPEG_AUTO_DOWNLOAD', 'false').lower() == 'true'
+SKIP_CONFIRM = os.environ.get('FFMPEG_SKIP_CONFIRM', 'false').lower() == 'true'
 FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
 
@@ -21,20 +23,33 @@ def download_ffmpeg(target_dir: Path):
     print("[*] 正在下载 FFmpeg...")
     zip_path = target_dir / "ffmpeg.zip"
 
-    def progress(block_num, block_size, total_size):
-        downloaded = block_num * block_size
-        percent = min(100, int(downloaded * 100 / total_size)) if total_size > 0 else 0
-        mb = downloaded / 1024 / 1024
-        total_mb = total_size / 1024 / 1024
-        sys.stdout.write(f"\r[*] 下载进度: {percent}% ({mb:.1f}/{total_mb:.1f} MB)")
-        sys.stdout.flush()
-
     try:
-        urllib.request.urlretrieve(FFMPEG_URL, zip_path, reporthook=progress)
+        with urllib.request.urlopen(FFMPEG_URL, timeout=120) as resp, \
+                open(zip_path, 'wb') as out:
+            total = int(resp.headers.get('Content-Length', 0))
+            downloaded = 0
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                out.write(chunk)
+                downloaded += len(chunk)
+                percent = min(100, int(downloaded * 100 / total)) if total > 0 else 0
+                mb = downloaded / 1024 / 1024
+                total_mb = total / 1024 / 1024
+                sys.stdout.write(f"\r[*] 下载进度: {percent}% ({mb:.1f}/{total_mb:.1f} MB)")
+                sys.stdout.flush()
         print("\n[*] 下载完成，正在解压...")
 
         extract_dir = target_dir / "temp"
         with zipfile.ZipFile(zip_path, 'r') as z:
+            base = extract_dir.resolve()
+            for member in z.infolist():
+                if not member.filename or member.is_dir():
+                    continue
+                target = (extract_dir / member.filename).resolve()
+                if not str(target).startswith(str(base)):
+                    raise ValueError(f"非法压缩包路径: {member.filename}")
             z.extractall(extract_dir)
 
         found = False
@@ -45,7 +60,7 @@ def download_ffmpeg(target_dir: Path):
                     src = src_dir / f
                     if src.exists():
                         shutil.copy2(src, target_dir / f)
-                for dll in src_dir.glob("*.dll"):
+                for dll in src_dir.rglob("*.dll"):
                     shutil.copy2(dll, target_dir / dll.name)
                 found = True
                 break
@@ -56,9 +71,11 @@ def download_ffmpeg(target_dir: Path):
         if not found:
             print("[!] 错误：压缩包中未找到 ffmpeg.exe")
             return False
+        if not (target_dir / "ffprobe.exe").exists():
+            print("[!] 警告：未找到 ffprobe.exe，媒体信息探测将不可用")
         print("[+] FFmpeg 准备完成")
         return True
-    except (OSError, urllib.error.URLError, zipfile.BadZipFile, ValueError) as e:
+    except (OSError, urllib.error.URLError, zipfile.BadZipFile, ValueError, TimeoutError) as e:
         print(f"\n[!] 下载失败: {e}")
         return False
 
@@ -86,6 +103,8 @@ def prepare_ffmpeg():
         if dlls:
             print(f"  [+] {len(dlls)} 个 DLL 文件")
         if 'ffmpeg.exe' in copied:
+            if 'ffprobe.exe' not in copied:
+                print("[!] 警告：未找到 ffprobe.exe，媒体信息探测将不可用")
             return True
         print("[!] 警告：未找到 ffmpeg.exe，请检查 FFMPEG_PATH 环境变量")
 
@@ -121,10 +140,13 @@ def build():
     print("=" * 60)
 
     if not prepare_ffmpeg():
-        cont = input("\n是否继续打包? (可能没有 ffmpeg 功能) [Y/N]: ").strip().upper()
-        if cont != 'Y':
-            print("[*] 已取消")
-            return
+        if SKIP_CONFIRM:
+            print("[*] FFMPEG_SKIP_CONFIRM=true，继续打包")
+        else:
+            cont = input("\n是否继续打包? (可能没有 ffmpeg 功能) [Y/N]: ").strip().upper()
+            if cont != 'Y':
+                print("[*] 已取消")
+                return
 
     binaries = collect_binaries()
 
@@ -154,9 +176,12 @@ def build():
 
     try:
         PyInstaller.__main__.run(args)
-    except RuntimeError as e:
-        print(f"\n[!] 打包错误: {e}")
-        return
+    except (RuntimeError, SystemExit) as e:
+        if isinstance(e, SystemExit) and e.code == 0:
+            pass
+        else:
+            print(f"\n[!] 打包错误: {e}")
+            return
 
     dist_dir = Path("dist") / "MediaConverter"
     exe_path = dist_dir / "MediaConverter.exe"

@@ -1,11 +1,11 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSlider,
     QSpinBox, QLineEdit, QPushButton, QFileDialog, QGroupBox, QCheckBox,
-    QGridLayout, QSizePolicy, QScrollArea
+    QGridLayout, QSizePolicy, QScrollArea, QFrame
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QPropertyAnimation, QEasingCurve, QRect
 from pathlib import Path
- 
+
 from core.options import ConvertOptions
 from core.validators import parse_size
 
@@ -17,6 +17,114 @@ def _make_btn_grid(buttons: list[tuple[str, QPushButton]], columns: int = 5) -> 
         row, col = divmod(i, columns)
         grid.addWidget(btn, row, col)
     return grid
+
+
+class CollapsibleSection(QWidget):
+    def __init__(self, title: str, expanded: bool = True):
+        super().__init__()
+        self._expanded = expanded
+        self._animating = False
+        self._current_anim = None
+        self._init_ui(title)
+
+    def _init_ui(self, title: str):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        arrow = "▾" if self._expanded else "▸"
+        self.toggle_btn = QPushButton(f"{arrow} {title}")
+        self.toggle_btn.setObjectName("sectionToggle")
+        self.toggle_btn.setFixedHeight(34)
+        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_btn.clicked.connect(self._toggle)
+        layout.addWidget(self.toggle_btn)
+
+        self.content = QWidget()
+        self._content_layout = QVBoxLayout(self.content)
+        self._content_layout.setContentsMargins(0, 8, 0, 0)
+        self._content_layout.setSpacing(8)
+
+        self._target_height = 0
+        if self._expanded:
+            self.content.show()
+            self._target_height = 0
+        else:
+            self.content.hide()
+            self._target_height = 0
+
+        layout.addWidget(self.content)
+
+    @property
+    def content_layout(self) -> QVBoxLayout:
+        return self._content_layout
+
+    def _toggle(self):
+        if self._animating:
+            return
+        self._animating = True
+        if self._current_anim:
+            try:
+                self._current_anim.stop()
+                self._current_anim.deleteLater()
+            except RuntimeError:
+                pass
+            self._current_anim = None
+        anim = QPropertyAnimation(self.content, b"maximumHeight")
+        anim.setDuration(180)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        if self._expanded:
+            self._target_height = self.content.height()
+            anim.setStartValue(self._target_height)
+            anim.setEndValue(0)
+            anim.finished.connect(self._on_collapse_end)
+        else:
+            self.content.show()
+            self.content.setMaximumHeight(0)
+            self.content.adjustSize()
+            full = self.content.sizeHint().height()
+            anim.setStartValue(0)
+            anim.setEndValue(full)
+            anim.finished.connect(self._on_expand_end)
+
+        self._current_anim = anim
+        anim.start()
+
+    def _on_collapse_end(self):
+        self._expanded = False
+        self.content.hide()
+        self.content.setMaximumHeight(self._target_height)
+        self._update_arrow()
+        self._animating = False
+        if self._current_anim:
+            try:
+                self._current_anim.deleteLater()
+            except RuntimeError:
+                pass
+            self._current_anim = None
+
+    def _on_expand_end(self):
+        self._expanded = True
+        self.content.setMaximumHeight(16777215)
+        self._update_arrow()
+        self._animating = False
+        if self._current_anim:
+            try:
+                self._current_anim.deleteLater()
+            except RuntimeError:
+                pass
+            self._current_anim = None
+
+    def _update_arrow(self):
+        arrow = "▾" if self._expanded else "▸"
+        text = self.toggle_btn.text()
+        idx = text.index(" ") if " " in text else 1
+        self.toggle_btn.setText(f"{arrow}{text[idx:]}")
+
+    def set_expanded(self, expanded: bool):
+        if expanded != self._expanded and not self._animating:
+            self._toggle()
 
 
 class ParamPanel(QWidget):
@@ -47,16 +155,19 @@ class ParamPanel(QWidget):
 
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
-        # ═══════════════════ 视频参数 ═══════════════════
+        # ═══════════ 视频参数 ═══════════
         self._video_panel = QWidget()
         video_layout = QVBoxLayout(self._video_panel)
         video_layout.setContentsMargins(0, 0, 0, 0)
-        video_layout.setSpacing(10)
+        video_layout.setSpacing(6)
 
-        # 分辨率
+        # ── Section 1: 基础参数 ──
+        self._sec_basic = CollapsibleSection("基础参数", expanded=True)
+        bl = self._sec_basic.content_layout
+
         res_group = QGroupBox("分辨率")
         res_vl = QVBoxLayout(res_group)
         res_btns = []
@@ -89,7 +200,6 @@ class ParamPanel(QWidget):
         res_vl.addLayout(res_grid)
         res_vl.addLayout(res_custom)
 
-        # 帧率
         fps_group = QGroupBox("帧率")
         fps_vl = QVBoxLayout(fps_group)
         fps_btns = []
@@ -121,9 +231,8 @@ class ParamPanel(QWidget):
         row1 = QHBoxLayout()
         row1.addWidget(res_group, 3)
         row1.addWidget(fps_group, 2)
-        video_layout.addLayout(row1)
+        bl.addLayout(row1)
 
-        # 质量
         self._quality_group = QGroupBox("质量 (CRF: 0=无损 23=默认 51=最差)")
         quality_vl = QVBoxLayout(self._quality_group)
         self._quality_presets = {"无损": 0, "高质量": 15, "默认": 23, "低质量": 35, "极小": 51}
@@ -155,8 +264,8 @@ class ParamPanel(QWidget):
         quality_slider_row.addWidget(self.spin_quality)
         quality_vl.addLayout(quality_grid)
         quality_vl.addLayout(quality_slider_row)
+        bl.addWidget(self._quality_group)
 
-        # 码率
         bitrate_group = QGroupBox("码率 (留空=自动)")
         bitrate_vl = QVBoxLayout(bitrate_group)
         self._bitrate_btns = {}
@@ -185,9 +294,13 @@ class ParamPanel(QWidget):
         row2 = QHBoxLayout()
         row2.addWidget(self._quality_group, 3)
         row2.addWidget(bitrate_group, 2)
-        video_layout.addLayout(row2)
+        bl.addLayout(row2)
+        video_layout.addWidget(self._sec_basic)
 
-        # 视频编码器
+        # ── Section 2: 编码设置 ──
+        self._sec_encode = CollapsibleSection("编码设置", expanded=False)
+        el = self._sec_encode.content_layout
+
         codec_group = QGroupBox("视频编码器")
         codec_layout = QHBoxLayout(codec_group)
         codec_layout.addWidget(QLabel("编码器:"))
@@ -200,9 +313,8 @@ class ParamPanel(QWidget):
         self.combo_codec.addItem("Xvid (libxvid)", "libxvid")
         self.combo_codec.addItem("WMV2 (wmv2)", "wmv2")
         codec_layout.addWidget(self.combo_codec, 1)
-        video_layout.addWidget(codec_group)
+        el.addWidget(codec_group)
 
-        # 编码速度预设
         preset_group = QGroupBox("编码速度预设")
         preset_vl = QVBoxLayout(preset_group)
         preset_map = [
@@ -235,7 +347,6 @@ class ParamPanel(QWidget):
         preset_vl.addLayout(preset_grid)
         preset_vl.addLayout(pr_custom)
 
-        # GPU
         self.check_gpu = QCheckBox("启用 GPU 硬件加速")
         self.check_gpu.setEnabled(False)
         self.check_gpu.setMinimumHeight(30)
@@ -243,56 +354,16 @@ class ParamPanel(QWidget):
         row3 = QHBoxLayout()
         row3.addWidget(preset_group, 3)
         row3.addWidget(self.check_gpu, 2)
-        video_layout.addLayout(row3)
+        el.addLayout(row3)
+        video_layout.addWidget(self._sec_encode)
 
-        # 视频裁剪
-        self.check_trim = QCheckBox("视频裁剪")
-        self.check_trim.stateChanged.connect(self._toggle_trim)
-        video_layout.addWidget(self.check_trim)
+        # ── Section 3: 音频/裁剪 ──
+        self._sec_audio = CollapsibleSection("音频与裁剪", expanded=False)
+        al = self._sec_audio.content_layout
 
-        self.trim_widget = QWidget()
-        trim_layout = QHBoxLayout(self.trim_widget)
-        trim_layout.setContentsMargins(24, 0, 0, 0)
-        trim_layout.addWidget(QLabel("起始:"))
-        self.input_start = QLineEdit()
-        self.input_start.setPlaceholderText("00:01:30 或 90 秒")
-        self.input_start.setEnabled(False)
-        self.input_start.setMinimumHeight(30)
-        trim_layout.addWidget(self.input_start, 1)
-        trim_layout.addWidget(QLabel("时长:"))
-        self.input_duration = QLineEdit()
-        self.input_duration.setPlaceholderText("00:00:30 或 30 秒")
-        self.input_duration.setEnabled(False)
-        self.input_duration.setMinimumHeight(30)
-        trim_layout.addWidget(self.input_duration, 1)
-        video_layout.addWidget(self.trim_widget)
-
-        # 智能压缩
-        self.check_compress = QCheckBox("智能压缩 (指定目标大小)")
-        self.check_compress.stateChanged.connect(self._toggle_compress)
-        video_layout.addWidget(self.check_compress)
-
-        self.compress_widget = QWidget()
-        compress_layout = QHBoxLayout(self.compress_widget)
-        compress_layout.setContentsMargins(24, 0, 0, 0)
-        compress_layout.addWidget(QLabel("目标大小:"))
-        self.spin_compress = QSpinBox()
-        self.spin_compress.setRange(1, 10000)
-        self.spin_compress.setValue(50)
-        self.spin_compress.setSuffix(" MB")
-        self.spin_compress.setEnabled(False)
-        self.spin_compress.setMinimumHeight(30)
-        self.spin_compress.setMinimumWidth(80)
-        compress_layout.addWidget(self.spin_compress)
-        self.label_estimate = QLabel("")
-        compress_layout.addWidget(self.label_estimate)
-        compress_layout.addStretch()
-        video_layout.addWidget(self.compress_widget)
-
-        # 视频容器内音频编码
-        audio_in_video_group = QGroupBox("视频内音频编码")
-        audio_in_video_layout = QHBoxLayout(audio_in_video_group)
-        audio_in_video_layout.addWidget(QLabel("音频编码器:"))
+        video_inner_audio = QGroupBox("视频内音频编码")
+        via_layout = QHBoxLayout(video_inner_audio)
+        via_layout.addWidget(QLabel("音频编码器:"))
         self.combo_audio_codec = QComboBox()
         self.combo_audio_codec.setMinimumHeight(30)
         self.combo_audio_codec.addItem("自动 (根据容器选择)", "")
@@ -301,37 +372,34 @@ class ParamPanel(QWidget):
         self.combo_audio_codec.addItem("FLAC", "flac")
         self.combo_audio_codec.addItem("Opus (libopus)", "libopus")
         self.combo_audio_codec.addItem("PCM (pcm_s16le)", "pcm_s16le")
-        audio_in_video_layout.addWidget(self.combo_audio_codec, 1)
-        audio_in_video_layout.addWidget(QLabel("码率:"))
+        via_layout.addWidget(self.combo_audio_codec, 1)
+        via_layout.addWidget(QLabel("码率:"))
         self.combo_audio_bitrate = QComboBox()
         self.combo_audio_bitrate.setMinimumHeight(30)
         self.combo_audio_bitrate.addItems(["自动", "128k", "192k", "256k", "320k", "64k", "96k"])
         self.combo_audio_bitrate.setCurrentText("192k")
-        audio_in_video_layout.addWidget(self.combo_audio_bitrate)
-        video_layout.addWidget(audio_in_video_group)
+        via_layout.addWidget(self.combo_audio_bitrate)
+        al.addWidget(video_inner_audio)
 
-        # 流复制模式
-        self.check_stream_copy = QCheckBox("流复制（不重编码，仅改变容器格式）")
-        self.check_stream_copy.setMinimumHeight(30)
-        self.check_stream_copy.toggled.connect(self._toggle_stream_copy)
-        video_layout.addWidget(self.check_stream_copy)
-
-        # 音频处理（移除/替换）
         audio_action_group = QGroupBox("音频处理")
         audio_action_layout = QHBoxLayout(audio_action_group)
         self.check_remove_audio = QCheckBox("移除音频")
         self.check_remove_audio.setMinimumHeight(30)
-        self.btn_replace_audio = QPushButton("替换音频文件...")
+        self.btn_replace_audio = QPushButton("替换音频...")
         self.btn_replace_audio.setMinimumHeight(30)
         self.btn_replace_audio.clicked.connect(self._select_replace_audio)
         self.label_replace_audio = QLabel("")
-        self.label_replace_audio.setStyleSheet("color: #888; font-size: 11px;")
+        self.label_replace_audio.setObjectName("dialogHint")
         audio_action_layout.addWidget(self.check_remove_audio)
         audio_action_layout.addWidget(self.btn_replace_audio)
         audio_action_layout.addWidget(self.label_replace_audio, 1)
-        video_layout.addWidget(audio_action_group)
+        al.addWidget(audio_action_group)
 
-        # 画面裁剪
+        self.check_stream_copy = QCheckBox("流复制（不重编码，仅改变容器格式）")
+        self.check_stream_copy.setMinimumHeight(30)
+        self.check_stream_copy.toggled.connect(self._toggle_stream_copy)
+        al.addWidget(self.check_stream_copy)
+
         crop_group = QGroupBox("画面裁剪")
         crop_layout = QHBoxLayout(crop_group)
         crop_layout.addWidget(QLabel("宽:"))
@@ -348,27 +416,92 @@ class ParamPanel(QWidget):
         self.spin_crop_h.setSuffix(" px")
         self.spin_crop_h.setMinimumWidth(100)
         crop_layout.addWidget(self.spin_crop_h)
-        crop_layout.addWidget(QLabel("起点X:"))
+        crop_layout.addWidget(QLabel("X:"))
         self.spin_crop_x = QSpinBox()
         self.spin_crop_x.setRange(0, 10000)
         self.spin_crop_x.setValue(0)
-        self.spin_crop_x.setMinimumWidth(70)
+        self.spin_crop_x.setMinimumWidth(65)
         crop_layout.addWidget(self.spin_crop_x)
         crop_layout.addWidget(QLabel("Y:"))
         self.spin_crop_y = QSpinBox()
         self.spin_crop_y.setRange(0, 10000)
         self.spin_crop_y.setValue(0)
-        self.spin_crop_y.setMinimumWidth(70)
+        self.spin_crop_y.setMinimumWidth(65)
         crop_layout.addWidget(self.spin_crop_y)
         self.btn_auto_crop = QPushButton("自动检测黑边")
         self.btn_auto_crop.setMinimumHeight(30)
         self.btn_auto_crop.clicked.connect(self._on_auto_crop)
         crop_layout.addWidget(self.btn_auto_crop)
-        video_layout.addWidget(crop_group)
+        al.addWidget(crop_group)
 
+        rotate_group = QGroupBox("旋转 / 翻转")
+        rotate_layout = QHBoxLayout(rotate_group)
+        self.btn_rot90 = QPushButton("↻ 90°")
+        self.btn_rot90.setCheckable(True)
+        self.btn_rot90.setMinimumHeight(30)
+        rotate_layout.addWidget(self.btn_rot90)
+        self.btn_rot270 = QPushButton("↺ 270°")
+        self.btn_rot270.setCheckable(True)
+        self.btn_rot270.setMinimumHeight(30)
+        rotate_layout.addWidget(self.btn_rot270)
+        self.btn_flip_h = QPushButton("⇄ 水平翻转")
+        self.btn_flip_h.setCheckable(True)
+        self.btn_flip_h.setMinimumHeight(30)
+        rotate_layout.addWidget(self.btn_flip_h)
+        self.btn_flip_v = QPushButton("⇅ 垂直翻转")
+        self.btn_flip_v.setCheckable(True)
+        self.btn_flip_v.setMinimumHeight(30)
+        rotate_layout.addWidget(self.btn_flip_v)
+        self.btn_rot90.toggled.connect(lambda c: c and self.btn_rot270.setChecked(False))
+        self.btn_rot270.toggled.connect(lambda c: c and self.btn_rot90.setChecked(False))
+        al.addWidget(rotate_group)
+
+        self.check_trim = QCheckBox("视频裁剪 (起始/时长)")
+        self.check_trim.stateChanged.connect(self._toggle_trim)
+        al.addWidget(self.check_trim)
+
+        self.trim_widget = QWidget()
+        trim_layout = QHBoxLayout(self.trim_widget)
+        trim_layout.setContentsMargins(24, 0, 0, 0)
+        trim_layout.addWidget(QLabel("起始:"))
+        self.input_start = QLineEdit()
+        self.input_start.setPlaceholderText("00:01:30 或 90 秒")
+        self.input_start.setEnabled(False)
+        self.input_start.setMinimumHeight(30)
+        trim_layout.addWidget(self.input_start, 1)
+        trim_layout.addWidget(QLabel("时长:"))
+        self.input_duration = QLineEdit()
+        self.input_duration.setPlaceholderText("00:00:30 或 30 秒")
+        self.input_duration.setEnabled(False)
+        self.input_duration.setMinimumHeight(30)
+        trim_layout.addWidget(self.input_duration, 1)
+        al.addWidget(self.trim_widget)
+
+        self.check_compress = QCheckBox("智能压缩 (指定目标大小)")
+        self.check_compress.stateChanged.connect(self._toggle_compress)
+        al.addWidget(self.check_compress)
+
+        self.compress_widget = QWidget()
+        compress_layout = QHBoxLayout(self.compress_widget)
+        compress_layout.setContentsMargins(24, 0, 0, 0)
+        compress_layout.addWidget(QLabel("目标大小:"))
+        self.spin_compress = QSpinBox()
+        self.spin_compress.setRange(1, 10000)
+        self.spin_compress.setValue(50)
+        self.spin_compress.setSuffix(" MB")
+        self.spin_compress.setEnabled(False)
+        self.spin_compress.setMinimumHeight(30)
+        self.spin_compress.setMinimumWidth(80)
+        compress_layout.addWidget(self.spin_compress)
+        self.label_estimate = QLabel("")
+        compress_layout.addWidget(self.label_estimate)
+        compress_layout.addStretch()
+        al.addWidget(self.compress_widget)
+
+        video_layout.addWidget(self._sec_audio)
         video_layout.addStretch()
 
-        # ═══════════════════ 图片参数 ═══════════════════
+        # ═══════════ 图片参数 ═══════════
         self._image_panel = QWidget()
         image_layout = QVBoxLayout(self._image_panel)
         image_layout.setContentsMargins(0, 0, 0, 0)
@@ -387,7 +520,7 @@ class ParamPanel(QWidget):
         img_quality_layout.addLayout(img_quality_label_row)
 
         img_info_label = QLabel("JPG/WebP: 1-100  |  PNG: 压缩级别自动映射")
-        img_info_label.setStyleSheet("color: #888; font-size: 11px;")
+        img_info_label.setObjectName("dialogHint")
         img_quality_layout.addWidget(img_info_label)
         image_layout.addWidget(img_quality_group)
 
@@ -411,7 +544,7 @@ class ParamPanel(QWidget):
         image_layout.addWidget(img_resize_group)
         image_layout.addStretch()
 
-        # ═══════════════════ 音频参数 ═══════════════════
+        # ═══════════ 音频参数 ═══════════
         self._audio_panel = QWidget()
         audio_layout = QVBoxLayout(self._audio_panel)
         audio_layout.setContentsMargins(0, 0, 0, 0)
@@ -457,14 +590,14 @@ class ParamPanel(QWidget):
         self._image_panel.hide()
         self._audio_panel.hide()
 
-    # ═══════════════════ 模式切换 ═══════════════════
+    # ═══════ 模式切换 ═══════
     def set_media_type(self, media_type: str):
         self._media_type = media_type
         self._video_panel.setVisible(media_type == 'video')
         self._image_panel.setVisible(media_type == 'image')
         self._audio_panel.setVisible(media_type == 'audio')
 
-    # ═══════════════════ 分辨率 ═══════════════════
+    # ═══════ 分辨率 ═══════
     def _on_res_btn(self, clicked):
         if self._selected_res_btn is clicked:
             self._selected_res_btn = None
@@ -489,7 +622,7 @@ class ParamPanel(QWidget):
                 return label
         return self.input_resolution.text().strip()
 
-    # ═══════════════════ 帧率 ═══════════════════
+    # ═══════ 帧率 ═══════
     def _on_fps_btn(self, clicked):
         if self._selected_fps_btn is clicked:
             self._selected_fps_btn = None
@@ -514,7 +647,7 @@ class ParamPanel(QWidget):
                 return label
         return self.input_fps.text().strip()
 
-    # ═══════════════════ 质量 (视频 CRF) ═══════════════════
+    # ═══════ 质量 ═══════
     def _on_quality_btn(self, clicked, crf):
         self._quality_user_set = True
         if clicked.isChecked():
@@ -528,7 +661,7 @@ class ParamPanel(QWidget):
             self.spin_quality.blockSignals(False)
         else:
             for btn in self._quality_btns.values():
-                btn.setChecked(btn is clicked)
+                btn.setChecked(False)
             self._quality_user_set = False
 
     def _on_quality_slider(self, value):
@@ -549,7 +682,7 @@ class ParamPanel(QWidget):
         for label, btn in self._quality_btns.items():
             btn.setChecked(self._quality_presets[label] == value)
 
-    # ═══════════════════ 码率 ═══════════════════
+    # ═══════ 码率 ═══════
     def _on_bitrate_btn(self, clicked):
         if self._selected_bitrate_btn is clicked:
             self._selected_bitrate_btn = None
@@ -574,7 +707,7 @@ class ParamPanel(QWidget):
                 return label
         return self.input_bitrate.text().strip()
 
-    # ═══════════════════ 预设 ═══════════════════
+    # ═══════ 预设 ═══════
     def _on_preset_btn(self, clicked):
         preset_value = clicked.property("preset_value")
         if preset_value is None:
@@ -604,7 +737,7 @@ class ParamPanel(QWidget):
         pr = self.combo_preset.currentText()
         return "" if pr == "默认" else pr
 
-    # ═══════════════════ 开关 ═══════════════════
+    # ═══════ 开关 ═══════
     def _toggle_trim(self, state):
         enabled = state == Qt.CheckState.Checked.value
         self.input_start.setEnabled(enabled)
@@ -617,7 +750,7 @@ class ParamPanel(QWidget):
         enabled = state == Qt.CheckState.Checked.value
         self.spin_compress.setEnabled(enabled)
 
-    # ═══════════════════ 流复制 ═══════════════════
+    # ═══════ 流复制 ═══════
     def _toggle_stream_copy(self, checked):
         enabled = not checked
         for btn in self._res_btns.values():
@@ -636,16 +769,15 @@ class ParamPanel(QWidget):
         self.combo_preset.setEnabled(enabled)
         self.check_gpu.setEnabled(enabled and self._gpu_available)
         self.check_compress.setEnabled(enabled)
-        if checked:
-            self.check_remove_audio.setEnabled(True)
-            self.btn_replace_audio.setEnabled(True)
-        else:
-            self.check_remove_audio.setEnabled(True)
-            self.btn_replace_audio.setEnabled(True)
+        self.combo_audio_codec.setEnabled(enabled)
+        self.combo_audio_bitrate.setEnabled(enabled)
+        self.check_remove_audio.setEnabled(enabled)
+        self.btn_replace_audio.setEnabled(enabled)
 
-    # ═══════════════════ 音频替换/移除 ═══════════════════
+    # ═══════ 音频替换/移除 ═══════
     def _select_replace_audio(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择替换音频文件", filter="音频文件 (*.mp3 *.wav *.aac *.flac *.ogg *.m4a *.wma);;所有文件 (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择替换音频文件",
+            filter="音频文件 (*.mp3 *.wav *.aac *.flac *.ogg *.m4a *.wma);;所有文件 (*.*)")
         if path:
             self._replace_audio_path = path
             self.label_replace_audio.setText(Path(path).name)
@@ -653,7 +785,7 @@ class ParamPanel(QWidget):
             self._replace_audio_path = ''
             self.label_replace_audio.setText('')
 
-    # ═══════════════════ 自动裁剪检测 ═══════════════════
+    # ═══════ 自动裁剪 ═══════
     def _on_auto_crop(self):
         if self._media_type == 'video':
             self.btn_auto_crop.setEnabled(False)
@@ -672,7 +804,7 @@ class ParamPanel(QWidget):
         self.btn_auto_crop.setEnabled(True)
         self.btn_auto_crop.setText("自动检测黑边")
 
-    # ═══════════════════ 公开接口 ═══════════════════
+    # ═══════ 公开接口 ═══════
     def set_gpu_available(self, available: bool, gpu_name: str = '', gpu_type: str = ''):
         self._gpu_available = available
         self._gpu_type = gpu_type
@@ -701,6 +833,80 @@ class ParamPanel(QWidget):
 
     def get_compress_target_mb(self) -> int:
         return self.spin_compress.value()
+
+    def apply_options(self, options: dict):
+        if self._media_type == 'video':
+            w = options.get('width')
+            h = options.get('height')
+            if w and h:
+                self.input_resolution.setText(f"{w}x{h}")
+            fps = options.get('fps')
+            if fps:
+                self.input_fps.setText(str(fps))
+            q = options.get('quality')
+            if q is not None:
+                self.spin_quality.setValue(q)
+            br = options.get('bitrate')
+            if br:
+                self.input_bitrate.setText(str(br))
+            codec = options.get('codec')
+            if codec:
+                idx = self.combo_codec.findData(codec)
+                if idx >= 0:
+                    self.combo_codec.setCurrentIndex(idx)
+            preset = options.get('preset')
+            if preset:
+                target = self._preset_btns.get(preset)
+                for btn in self._preset_btns.values():
+                    btn.setChecked(btn is target)
+                self.combo_preset.blockSignals(True)
+                if target:
+                    self.combo_preset.setCurrentText(preset)
+                else:
+                    self.combo_preset.setCurrentText("默认")
+                self.combo_preset.blockSignals(False)
+            gpu = options.get('use_gpu')
+            if gpu:
+                self.check_gpu.setChecked(True)
+            cw = options.get('crop_w')
+            if cw:
+                self.spin_crop_w.setValue(cw)
+                ch = options.get('crop_h', 0)
+                if ch:
+                    self.spin_crop_h.setValue(ch)
+                cx = options.get('crop_x', 0)
+                if cx:
+                    self.spin_crop_x.setValue(cx)
+                cy = options.get('crop_y', 0)
+                if cy:
+                    self.spin_crop_y.setValue(cy)
+            start_time = options.get('start_time')
+            if start_time:
+                self.input_start.setText(str(start_time))
+            duration = options.get('trim_duration')
+            if duration:
+                self.input_duration.setText(str(duration))
+        elif self._media_type == 'image':
+            q = options.get('quality')
+            if q is not None:
+                self.spin_img_quality.setValue(q)
+            w = options.get('width')
+            if w:
+                self.spin_img_width.setValue(w)
+            h = options.get('height')
+            if h:
+                self.spin_img_height.setValue(h)
+        elif self._media_type == 'audio':
+            codec = options.get('audio_codec')
+            if codec and hasattr(self, 'combo_audio_only_codec'):
+                idx = self.combo_audio_only_codec.findData(codec)
+                if idx >= 0:
+                    self.combo_audio_only_codec.setCurrentIndex(idx)
+            br = options.get('audio_bitrate')
+            if br and hasattr(self, 'combo_audio_bitrate'):
+                idx = self.combo_audio_bitrate.findText(br)
+                if idx >= 0:
+                    self.combo_audio_bitrate.setCurrentIndex(idx)
 
     def get_options(self) -> ConvertOptions:
         opts = ConvertOptions()
@@ -769,6 +975,15 @@ class ParamPanel(QWidget):
                 opts.crop_h = ch
                 opts.crop_x = self.spin_crop_x.value()
                 opts.crop_y = self.spin_crop_y.value()
+
+            if self.btn_rot90.isChecked():
+                opts.rotate = 90
+            elif self.btn_rot270.isChecked():
+                opts.rotate = 270
+            if self.btn_flip_h.isChecked():
+                opts.flip_h = True
+            if self.btn_flip_v.isChecked():
+                opts.flip_v = True
 
         elif self._media_type == 'image':
             q = self.spin_img_quality.value()

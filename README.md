@@ -2,7 +2,7 @@
 
 Windows 环境的一体化媒体转换工具，基于 FFmpeg，支持视频/图片/音频格式互转。
 
-**v4.0 更新：流复制/音频控制/自动裁剪/进度ETA/完成通知/视频拼接/媒体信息导出/批量模板。**
+**v5.0 更新：架构重构/并发安全加固/命令行预览/历史还原参数/旋转翻转滤镜。**
 
 ## 功能特性
 
@@ -18,6 +18,7 @@ Windows 环境的一体化媒体转换工具，基于 FFmpeg，支持视频/图�
 - **音频控制** — 移除原音频、替换为外部音频文件
 - **自动裁剪检测** — 一键检测视频黑边区域并应用裁剪
 - **视频拼接** — 多视频文件合并，支持流复制无损拼接
+- **旋转/翻转** — 90°旋转、270°旋转、水平镜像、垂直翻转
 
 ### 音频转换
 - 音频格式互转：MP3 / WAV / AAC / FLAC / OGG / WMA / M4A
@@ -44,8 +45,10 @@ Windows 环境的一体化媒体转换工具，基于 FFmpeg，支持视频/图�
 - **媒体信息对话框** — 缩略图 + 详细文件信息 + TXT/JSON 导出
 - 批量转换 — 拖入多个文件或整个文件夹，设定并发数 + **模板自定义输出路径**
 - **视频拼接对话框** — 拖拽排序文件列表，支持流复制
-- 历史记录一键重转
-- 卡片化 UI + 渐变按钮 + 芯片格式 + 暗色主题（Catppuccin 风格）
+- **历史记录一键重转** — 自动还原上次转换的所有参数（分辨率/质量/裁剪/旋转等）
+- **打开输出目录** — 历史记录中一键打开已生成文件的所在文件夹
+- **命令行预览** — 转换前预览将执行的完整 FFmpeg 命令
+- 卡片化 UI + 渐变按钮 + 芯片格式 + MD3 双主题（亮/暗可切换，随系统偏好）
 
 ## 下载使用
 
@@ -102,6 +105,7 @@ set FFMPEG_PATH=C:\ffmpeg\bin
 | **流复制** | 勾选启用（无损改封装） | 视频+音频透传，不变码 |
 | **音频控制** | — | 移除音频 / 替换为外部文件 |
 | **自动裁剪** | 检测黑边并填入裁剪参数 | 一键检测按钮 |
+| **旋转/翻转** | — | ↻90° ↺270° ⇄水平 ⇅垂直（可切换按钮） |
 
 ## 项目结构
 
@@ -110,12 +114,15 @@ MediaConverter/
 ├── main.py                  # GUI 入口
 ├── core/                    # 业务逻辑层（无 Qt 依赖）
 │   ├── constants.py         # 共享文件扩展名常量 + 版本号
-│   ├── converter.py         # 核心转换引擎
-│   ├── options.py           # ConvertOptions 参数数据类
-│   ├── ffmpeg.py            # FFmpeg 路径查找 + GPU 检测
-│   ├── history.py           # 历史记录管理
+│   ├── converter.py         # 核心转换引擎（组合 Probe/CommandBuilder/ProgressParser）
+│   ├── probe.py             # ffprobe 探测层（JSON 解析 + filepath 缓存）
+│   ├── command_builder.py   # FFmpeg 命令行构建器（独立可测）
+│   ├── progress_parser.py   # 进度行解析 + ETA 计算
+│   ├── options.py           # ConvertOptions 参数数据类（含字段白名单校验）
+│   ├── ffmpeg.py            # FFmpeg 路径查找 + GPU 检测 + SHA256 指纹校验
+│   ├── history.py           # 历史记录管理（原子写入 + frozen 打包适配）
 │   ├── queue.py             # 批量转换队列
-│   └── validators.py        # FFmpeg 参数白名单 + 路径校验
+│   └── validators.py        # FFmpeg 参数白名单 + 路径校验 + 尺寸解析
 ├── gui/                     # PyQt6 GUI 层
 │   ├── main_window.py       # 主窗口（侧边栏 + QStackedWidget）
 │   ├── pages/               # 独立功能页面
@@ -128,14 +135,19 @@ MediaConverter/
 │   │   ├── progress_panel.py # 进度条 + ETA + 日志
 │   │   └── history_table.py # 历史记录表格
 │   ├── workers/             # QThread 后台线程
-│   │   ├── convert_worker.py # 转换 + 批量 Worker（含 ETA 信号）
-│   │   └── detect_worker.py  # GPU 检测
+│   │   ├── convert_worker.py # 转换 + 批量 Worker
+│   │   ├── concat_worker.py  # 拼接 Worker (从 concat_dialog 迁出)
+│   │   ├── detect_worker.py  # GPU 检测
+│   │   ├── crop_worker.py    # 裁剪检测
+│   │   ├── info_worker.py    # 文件信息加载 (异步化 ffprobe)
+│   │   └── thumbnail_worker.py # 缩略图提取 (从 info_dialog 迁出)
 │   ├── dialogs/             # 对话框
 │   │   ├── batch_dialog.py  # 批量转换（格式选择 + 路径模板）
 │   │   ├── concat_dialog.py # 视频拼接（拖拽排序 + 流复制）
 │   │   └── info_dialog.py   # 媒体信息（缩略图 + 详情 + 导出）
-│   └── styles/dark.qss      # 暗色主题（卡片/渐变/芯片样式）
-├── tests/                   # 核心模块单元测试（105 项，7 文件）
+│   ├── theme.py             # MD3 双主题管理器（亮/暗 token 系统）
+│   └── styles/material.qss  # MD3 双主题 QSS 模板（{token} 占位符渲染）
+├── tests/                   # 核心模块单元测试（263 tests，14 文件）
 ├── ico/                     # 应用图标
 ├── ffmpeg/                  # FFmpeg 二进制（gitignore）
 ├── build.py                 # PyInstaller 打包脚本
@@ -145,14 +157,15 @@ MediaConverter/
 
 ## 技术细节
 
-- GUI：PyQt6 + QSS 暗色主题
+- GUI：PyQt6 + MD3 双主题 QSS（亮/暗可切换）
 - 核心引擎：FFmpeg 7.x
 - 视频编码：H.264 (libx264/GPU)、H.265 (libx265)、VP9 (libvpx-vp9)、Xvid (libxvid)、WMV2
 - 硬件加速：`-hwaccel cuda/d3d11va/qsv` 解码 + GPU 编码器
 - 音频编码：AAC / libopus / wmav2 / libmp3lame / FLAC / PCM / libvorbis（按格式自动选择）
-- 图片处理：Lanczos 缩放、高质量压缩、GIF 调色板优化
-- 并发：ThreadPoolExecutor + `threading.Event` 取消 + 多进程追踪
+- 图片处理：Lanczos 缩放、高质量压缩、GIF 调色板优化、旋转/翻转滤镜
+- 并发：每页独立 MediaConverter 实例 + ThreadPoolExecutor + `threading.Event` 取消 + `_cancel_event` TOCTOU 防护
 - 进度：实时解析 `ffmpeg stderr:time=` 输出为百分比 + `speed=` 计算 ETA
+- 安全：extra_args 白名单 + 值黑名单、SHA256 指纹校验、输出超时保护、覆盖确认弹窗
 - 批量模板：`{原名}` `{格式}` `{序号}` `{日期}` `{原路径}` 自定义文件名
 - 拼接：`-f concat` demuxer + 临时文件列表，支持 `-c copy` 无损
 - 打包：PyInstaller（目录模式，~120MB 含 FFmpeg）
@@ -160,7 +173,7 @@ MediaConverter/
 ## 测试
 
 ```bash
-# 核心测试（105 tests，7 文件）
+# 核心测试（263 tests，14 文件）
 .venv\Scripts\python.exe -m unittest discover tests -v
 
 # 旧版 CLI 模块测试（19 tests，在 backup/ 目录）

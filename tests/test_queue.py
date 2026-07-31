@@ -115,5 +115,22 @@ class TestConversionQueue(unittest.TestCase):
         self.assertEqual(q.tasks[0].status, 'failed')
 
 
+    def test_results_in_submission_order(self):
+        import time
+
+        def slow_convert(inp, out, opts):
+            time.sleep(0.05)
+            return True
+
+        self.converter.convert.side_effect = slow_convert
+        q = ConversionQueue(self.converter, max_workers=1)
+        q.add_task("in_0", "out_0", ConvertOptions())
+        q.add_task("in_1", "out_1", ConvertOptions())
+        q.add_task("in_2", "out_2", ConvertOptions())
+        results = q.process()
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all(results))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -74,6 +74,15 @@ class TestFFmpegManager(unittest.TestCase):
         self.assertIsNone(hwaccel)
 
     @patch('subprocess.run')
+    def test_detect_gpu_encoder_unusable_falls_back_to_cpu(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout='encoders\nh264_nvenc\n')
+        mgr = FFmpegManager()
+        mgr.ffmpeg_path = '/fake/ffmpeg'
+        gpu_type, hwaccel = mgr.detect_gpu()
+        self.assertIsNone(gpu_type)
+        self.assertIsNone(hwaccel)
+
+    @patch('subprocess.run')
     def test_detect_gpu_no_ffmpeg(self, mock_run):
         mgr = FFmpegManager()
         gpu_type, hwaccel = mgr.detect_gpu()
@@ -107,6 +116,17 @@ class TestFFmpegManager(unittest.TestCase):
         mgr.ffmpeg_path = '/fake/ffmpeg'
         ver = mgr.get_version()
         self.assertEqual(ver, 'unknown')
+
+
+    @patch('subprocess.run')
+    @patch('pathlib.Path.exists', return_value=True)
+    @patch.dict('os.environ', {'FFMPEG_PATH': '/custom/ffmpeg'})
+    def test_find_ffmpeg_env_var(self, mock_exists, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout='ffmpeg version 7.0')
+        mgr = FFmpegManager()
+        mgr.base_dir = Path("/fake")
+        result = mgr.find_ffmpeg()
+        self.assertIn('custom', result)
 
 
 if __name__ == '__main__':

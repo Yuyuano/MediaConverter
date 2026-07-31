@@ -1,16 +1,18 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QHBoxLayout, QHeaderView, QMessageBox,
+    QPushButton, QHBoxLayout, QHeaderView, QMessageBox, QLabel,
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from pathlib import Path
+import os
+import sys
+import subprocess
 
 from core.history import HistoryManager
 
 
 class HistoryTable(QWidget):
-    """历史记录表格"""
-    replay_requested = pyqtSignal(dict)  # record
+    replay_requested = pyqtSignal(dict)
 
     def __init__(self, history_mgr: HistoryManager):
         super().__init__()
@@ -20,15 +22,29 @@ class HistoryTable(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
 
         header_row = QHBoxLayout()
-        header_row.addWidget(QPushButton("刷新", clicked=self.refresh))
-        self.btn_clear = QPushButton("清空历史")
-        self.btn_clear.clicked.connect(self._clear_all)
-        header_row.addWidget(self.btn_clear)
+        title = QLabel("转换历史")
+        title.setObjectName("pageTitle")
+        header_row.addWidget(title)
         header_row.addStretch()
+
+        self.btn_refresh = QPushButton("↻ 刷新")
+        self.btn_refresh.setFixedHeight(30)
+        self.btn_refresh.clicked.connect(self.refresh)
+        self.btn_clear = QPushButton("清空历史")
+        self.btn_clear.setFixedHeight(30)
+        self.btn_clear.clicked.connect(self._clear_all)
+        header_row.addWidget(self.btn_refresh)
+        header_row.addWidget(self.btn_clear)
         layout.addLayout(header_row)
+
+        self.empty_label = QLabel("暂无转换记录")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setObjectName("emptyLabel")
+        layout.addWidget(self.empty_label)
 
         self.table = QTableWidget()
         self.table.setColumnCount(4)
@@ -46,6 +62,16 @@ class HistoryTable(QWidget):
 
     def refresh(self):
         records = self._history.get_recent(20)
+        has_records = len(records) > 0
+        self.empty_label.setVisible(not has_records)
+        self.table.setVisible(has_records)
+
+        for i in range(self.table.rowCount()):
+            w = self.table.cellWidget(i, 3)
+            if w:
+                self.table.removeCellWidget(i, 3)
+                w.deleteLater()
+
         self.table.setRowCount(len(records))
         for i, rec in enumerate(records):
             self.table.setItem(i, 0, QTableWidgetItem(rec.get('time', '')))
@@ -54,16 +80,22 @@ class HistoryTable(QWidget):
             self.table.setItem(i, 2, QTableWidgetItem(rec.get('format', '')))
 
             btn_replay = QPushButton("重新转换")
+            btn_replay.setObjectName("tableActionBtn")
             btn_replay.setFixedSize(72, 26)
-            btn_replay.setStyleSheet(
-                "QPushButton { padding: 0px 4px; font-size: 12px; }"
-            )
             btn_replay.clicked.connect(lambda checked, r=rec: self.replay_requested.emit(r))
+
+            output_file = rec.get('output', '')
+            btn_open = QPushButton("打开")
+            btn_open.setObjectName("tableActionBtn")
+            btn_open.setFixedSize(42, 26)
+            if output_file:
+                btn_open.clicked.connect(lambda checked, p=output_file: self._open_dir(str(Path(p).parent)))
+            else:
+                btn_open.setEnabled(False)
+
             btn_delete = QPushButton("删除")
+            btn_delete.setObjectName("tableActionBtn")
             btn_delete.setFixedSize(42, 26)
-            btn_delete.setStyleSheet(
-                "QPushButton { padding: 0px 4px; font-size: 12px; }"
-            )
             btn_delete.clicked.connect(lambda checked, row=i: self._delete_row(row))
 
             action_widget = QWidget()
@@ -73,6 +105,7 @@ class HistoryTable(QWidget):
             action_layout.setSpacing(8)
             action_layout.addStretch()
             action_layout.addWidget(btn_replay)
+            action_layout.addWidget(btn_open)
             action_layout.addWidget(btn_delete)
             action_layout.addStretch()
             self.table.setCellWidget(i, 3, action_widget)
@@ -80,6 +113,15 @@ class HistoryTable(QWidget):
     def _delete_row(self, row: int):
         self._history.delete_record(row)
         self.refresh()
+
+    def _open_dir(self, dirpath: str):
+        if os.path.exists(dirpath):
+            if sys.platform == 'win32':
+                os.startfile(dirpath)
+            else:
+                subprocess.run(['xdg-open', dirpath])
+        else:
+            QMessageBox.warning(self, "提示", f"目录不存在:\n{dirpath}")
 
     def _clear_all(self):
         reply = QMessageBox.question(

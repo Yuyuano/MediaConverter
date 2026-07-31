@@ -47,9 +47,9 @@ class ConversionQueue:
         with self._tasks_lock:
             self.tasks.clear()
         self._cancel_event.clear()
+        self.converter.reset_cancellation()
 
     def process(self) -> List[bool]:
-        self._cancel_event.clear()
         with self._tasks_lock:
             tasks = list(self.tasks)
         total = len(tasks)
@@ -70,7 +70,7 @@ class ConversionQueue:
                 task.status = 'completed' if success else 'failed'
                 task.result = success
                 return success
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, TypeError, AttributeError) as e:
                 task.status = 'failed'
                 task.result = False
                 logger.error(f"任务 {task.id} 异常: {e}", exc_info=True)
@@ -93,7 +93,7 @@ class ConversionQueue:
                     results_map[task.id] = success
                     if self._on_task_done:
                         self._on_task_done(task, success)
-                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, TypeError, AttributeError) as e:
                     results_map[task.id] = False
                     logger.error(f"任务 {task.id} 异常: {e}")
                     if self._on_task_done:

@@ -209,7 +209,7 @@ class TestMediaConverterBuildVideoOpts(unittest.TestCase):
         opts = ConvertOptions(quality=5)
         result = self.conv._build_image_opts('.jpg', opts)
         self.assertIn('-q:v', result)
-        self.assertIn('format=yuvj420p', result)
+        self.assertNotIn('yuvj420p', result)
 
     def test_image_opts_png(self):
         opts = ConvertOptions(quality=5)
@@ -342,6 +342,297 @@ class TestMediaConverterGetDefaultOpts(unittest.TestCase):
     def test_default_unknown(self):
         opts = self.conv.get_default_opts('xyz', 'video')
         self.assertIsNone(opts.quality)
+
+
+class TestMediaConverterRunFfmpeg(unittest.TestCase):
+
+    def setUp(self):
+        self.conv = MediaConverter()
+        self.conv._ffmpeg_mgr.ffmpeg_path = '/fake/ffmpeg'
+        self.conv._ffmpeg_mgr.ffprobe_path = '/fake/ffprobe'
+
+    @patch('subprocess.Popen')
+    @patch('os.path.getsize', return_value=1024)
+    @patch('core.converter.MediaConverter.get_duration', return_value=60.0)
+    def test_run_ffmpeg_success(self, mock_dur, mock_size, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(['frame=100 time=00:00:30.00 speed=2.0x\n'])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
+        mock_popen.return_value = mock_proc
+        self.conv.history = MagicMock()
+
+        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+        result = self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        self.assertTrue(result)
+        self.conv.history.add_record.assert_called_once()
+
+    @patch('subprocess.Popen')
+    @patch('core.converter.MediaConverter.get_duration', return_value=0.0)
+    def test_run_ffmpeg_failure(self, mock_dur, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 1
+        mock_proc.poll.return_value = 1
+        mock_popen.return_value = mock_proc
+
+        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+        result = self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        self.assertFalse(result)
+
+    @patch('subprocess.Popen', side_effect=OSError("file not found"))
+    def test_run_ffmpeg_exception(self, mock_popen):
+        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+        result = self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        self.assertFalse(result)
+
+    @patch('subprocess.Popen')
+    @patch('core.converter.MediaConverter.get_duration', return_value=60.0)
+    def test_run_ffmpeg_eta_emitted(self, mock_dur, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(['frame=100 time=00:00:30.00 speed=2.0x\n'])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
+        mock_popen.return_value = mock_proc
+
+        eta_signals = []
+        self.conv.set_callbacks(on_eta=lambda eta: eta_signals.append(eta))
+        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+        self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        self.assertTrue(any('ETA' in e for e in eta_signals))
+
+    @patch('subprocess.Popen')
+    @patch('core.converter.MediaConverter.get_duration', return_value=60.0)
+    def test_run_ffmpeg_process_cleaned_up(self, mock_dur, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.return_value = None
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
+        mock_popen.return_value = mock_proc
+
+        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+        self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        self.assertEqual(len(self.conv._active_processes), 0)
+
+    @patch('subprocess.Popen')
+    @patch('core.converter.MediaConverter.get_duration', return_value=60.0)
+    def test_run_ffmpeg_timeout_kills_process(self, mock_dur, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([])
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired('ffmpeg', 60)
+        mock_proc.returncode = 1
+        mock_proc.poll.return_value = 1
+        mock_popen.return_value = mock_proc
+
+        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+        result = self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        self.assertFalse(result)
+        mock_proc.kill.assert_called_once()
+
+    @patch('subprocess.Popen')
+    @patch('core.converter.MediaConverter.get_duration', return_value=0.0)
+    def test_run_ffmpeg_cancel_before_popen(self, mock_dur, mock_popen):
+        self.conv.cleanup()
+        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+        result = self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        self.assertFalse(result)
+        self.assertFalse(self.conv._active_processes)
+
+    @patch('subprocess.Popen')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_rejected_after_cancel_without_reset(self, mock_exists, mock_popen):
+        self.conv.cleanup()
+        result = self.conv.convert('in.mp4', 'out.mp4', ConvertOptions())
+        self.assertFalse(result)
+        self.assertFalse(self.conv._active_processes)
+
+    def test_convert_allowed_after_reset_cancellation(self):
+        self.conv.cleanup()
+        self.conv.reset_cancellation()
+        self.assertFalse(self.conv._cancel_event.is_set())
+
+    def test_reset_callbacks_restores_defaults(self):
+        calls = []
+        self.conv.set_callbacks(on_log=lambda lvl, msg: calls.append(msg))
+        self.conv._on_log('info', 'hi')
+        self.assertEqual(calls, ['hi'])
+        self.conv.reset_callbacks()
+        calls.clear()
+        self.conv._on_log('info', 'bye')
+        self.assertEqual(calls, [])
+
+
+class TestMediaConverterCleanup(unittest.TestCase):
+
+    def setUp(self):
+        self.conv = MediaConverter()
+
+    def test_cleanup_terminates_running_process(self):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        self.conv._active_processes.add(mock_proc)
+        self.conv.cleanup()
+        mock_proc.terminate.assert_called_once()
+
+    def test_cleanup_clears_process_set(self):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        self.conv._active_processes.add(mock_proc)
+        self.conv.cleanup()
+        self.assertEqual(len(self.conv._active_processes), 0)
+
+    def test_cleanup_handles_wait_timeout(self):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd='', timeout=3)
+        self.conv._active_processes.add(mock_proc)
+        self.conv.cleanup()
+        mock_proc.kill.assert_called_once()
+
+
+class TestMediaConverterDetectCrop(unittest.TestCase):
+
+    def setUp(self):
+        self.conv = MediaConverter()
+        self.conv._ffmpeg_mgr.ffmpeg_path = '/fake/ffmpeg'
+
+    def test_detect_crop_no_ffmpeg(self):
+        self.conv._ffmpeg_mgr.ffmpeg_path = None
+        result = self.conv.detect_crop('input.mp4')
+        self.assertIsNone(result)
+
+    @patch('subprocess.run')
+    def test_detect_crop_success(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stderr='some lines\n[cropdetect @ 0x55] crop=1280:720:0:30\nmore lines'
+        )
+        result = self.conv.detect_crop('input.mp4')
+        self.assertEqual(result, {'w': 1280, 'h': 720, 'x': 0, 'y': 30})
+
+    @patch('subprocess.run', side_effect=OSError("fail"))
+    def test_detect_crop_exception(self, mock_run):
+        result = self.conv.detect_crop('input.mp4')
+        self.assertIsNone(result)
+
+
+class TestMediaConverterExtractThumbnail(unittest.TestCase):
+
+    def setUp(self):
+        self.conv = MediaConverter()
+        self.conv._ffmpeg_mgr.ffmpeg_path = '/fake/ffmpeg'
+
+    def test_thumbnail_no_ffmpeg(self):
+        self.conv._ffmpeg_mgr.ffmpeg_path = None
+        result = self.conv.extract_thumbnail('in.mp4', 'out.jpg')
+        self.assertFalse(result)
+
+    @patch('subprocess.run')
+    def test_thumbnail_success(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        result = self.conv.extract_thumbnail('in.mp4', 'out.jpg', time_sec=5.0)
+        self.assertTrue(result)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn('-ss', cmd)
+        self.assertIn('5.0', cmd)
+
+    @patch('subprocess.run')
+    def test_thumbnail_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1)
+        result = self.conv.extract_thumbnail('in.mp4', 'out.jpg')
+        self.assertFalse(result)
+
+
+class TestMediaConverterConcatVideos(unittest.TestCase):
+
+    def setUp(self):
+        self.conv = MediaConverter()
+        self.conv._ffmpeg_mgr.ffmpeg_path = '/fake/ffmpeg'
+        self.conv._ffmpeg_mgr.ffprobe_path = '/fake/ffprobe'
+
+    def test_concat_too_few_files(self):
+        result = self.conv.concat_videos(['single.mp4'], 'out.mp4')
+        self.assertFalse(result)
+
+    @patch('core.converter.MediaConverter._run_ffmpeg', return_value=True)
+    @patch('core.converter.MediaConverter.get_file_summary')
+    def test_concat_success(self, mock_summary, mock_run):
+        mock_summary.return_value = {'duration': 10.0, 'valid': True}
+        result = self.conv.concat_videos(['a.mp4', 'b.mp4'], 'out.mp4')
+        self.assertTrue(result)
+        mock_run.assert_called_once()
+
+    @patch('core.converter.MediaConverter._run_ffmpeg', return_value=True)
+    @patch('core.converter.MediaConverter.get_file_summary')
+    def test_concat_computes_total_duration(self, mock_summary, mock_run):
+        mock_summary.return_value = {'duration': 15.5, 'valid': True}
+        self.conv.concat_videos(['a.mp4', 'b.mp4'], 'out.mp4')
+        call_args = mock_run.call_args
+        opts = call_args[0][4]
+        self.assertEqual(opts.trim_duration, '31.0')
+
+
+class TestMediaConverterConvertErrorPaths(unittest.TestCase):
+
+    def setUp(self):
+        self.conv = MediaConverter()
+        self.conv._ffmpeg_mgr.ffmpeg_path = '/fake/ffmpeg'
+        self.conv._ffmpeg_mgr.ffprobe_path = '/fake/ffprobe'
+
+    def test_convert_no_ffmpeg(self):
+        conv = MediaConverter()
+        result = conv.convert('in.mp4', 'out.mp4', ConvertOptions())
+        self.assertFalse(result)
+
+    @patch('os.path.exists', return_value=True)
+    def test_convert_invalid_output_dir(self, mock_exists):
+        opts = ConvertOptions(output_dir='..\\..\\Windows')
+        result = self.conv.convert('in.mp4', 'out.mp4', opts)
+        self.assertFalse(result)
+
+    @patch('core.converter.MediaConverter._run_ffmpeg', return_value=True)
+    @patch('os.path.exists', return_value=True)
+    def test_convert_stream_copy(self, mock_exists, mock_run):
+        opts = ConvertOptions(stream_copy=True)
+        result = self.conv.convert('in.mp4', 'out.mp4', opts)
+        self.assertTrue(result)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn('-c:v', cmd)
+        self.assertIn('copy', cmd)
+
+
+class TestBuildCommand(unittest.TestCase):
+
+    def setUp(self):
+        self.conv = MediaConverter()
+        self.conv._ffmpeg_mgr.ffmpeg_path = '/fake/ffmpeg'
+        self.conv._ffmpeg_mgr.ffprobe_path = '/fake/ffprobe'
+
+    @patch('os.path.exists', return_value=True)
+    def test_build_command_success(self, mock_exists):
+        opts = ConvertOptions(quality=23)
+        cmd = self.conv.build_command('in.mp4', 'out.mp4', opts)
+        self.assertIsNotNone(cmd)
+        self.assertIn('out.mp4', cmd)
+
+    def test_build_command_no_ffmpeg(self):
+        conv = MediaConverter()
+        cmd = conv.build_command('in.mp4', 'out.mp4', ConvertOptions())
+        self.assertIsNone(cmd)
+
+    def test_build_command_input_missing(self):
+        cmd = self.conv.build_command('/nonexistent.mp4', 'out.mp4', ConvertOptions())
+        self.assertIsNone(cmd)
+
+    @patch('os.path.exists', return_value=True)
+    def test_build_command_invalid_output_dir(self, mock_exists):
+        opts = ConvertOptions(output_dir='..\\..\\Windows')
+        cmd = self.conv.build_command('in.mp4', 'out.mp4', opts)
+        self.assertIsNone(cmd)
 
 
 if __name__ == '__main__':

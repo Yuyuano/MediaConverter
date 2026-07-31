@@ -17,8 +17,15 @@ from queue import Queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-from colorama import init, Fore, Style
-init(autoreset=True)
+try:
+    from colorama import init, Fore, Style
+    init(autoreset=True)
+except ImportError:
+    init = lambda autoreset=True: None
+    class Fore:
+        RED = GREEN = YELLOW = CYAN = MAGENTA = BLUE = WHITE = RESET = ''
+    class Style:
+        RESET_ALL = DIM = BRIGHT = ''
 
 # 日志配置
 LOG_DIR = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))) / 'FFmpegConverter'

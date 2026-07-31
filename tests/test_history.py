@@ -81,5 +81,51 @@ class TestHistoryManager(unittest.TestCase):
         self.assertNotIn('height', history[0]['options'])
 
 
+    def test_delete_record(self):
+        opts = ConvertOptions()
+        self.history_mgr.add_record("a.mp4", "mp4", opts)
+        self.history_mgr.add_record("b.mp4", "mp4", opts)
+        self.assertTrue(self.history_mgr.delete_record(0))
+        history = self.history_mgr.load_history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]['file'], 'a.mp4')
+
+    def test_delete_record_out_of_bounds(self):
+        opts = ConvertOptions()
+        self.history_mgr.add_record("a.mp4", "mp4", opts)
+        self.assertFalse(self.history_mgr.delete_record(5))
+        self.assertFalse(self.history_mgr.delete_record(-1))
+
+    def test_clear_history(self):
+        opts = ConvertOptions()
+        self.history_mgr.add_record("a.mp4", "mp4", opts)
+        self.history_mgr.clear_history()
+        history = self.history_mgr.load_history()
+        self.assertEqual(history, [])
+
+    def test_concurrent_add_record(self):
+        import threading
+        self.history_mgr.max_history = 100
+        errors = []
+
+        def add_records(thread_id):
+            try:
+                for i in range(10):
+                    opts = ConvertOptions(quality=i)
+                    self.history_mgr.add_record(f"thread{thread_id}_file{i}.mp4", "mp4", opts)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_records, args=(t,)) for t in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(len(errors), 0, f"Concurrent errors: {errors}")
+        history = self.history_mgr.load_history()
+        self.assertEqual(len(history), 50)
+
+
 if __name__ == '__main__':
     unittest.main()
