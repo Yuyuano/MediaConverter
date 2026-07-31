@@ -115,6 +115,10 @@ Three-layer design: `core/` (pure logic, no Qt), `gui/` (PyQt6 widgets + workers
 
 ## Conventions
 
+- **Hard constraints on side effects**:
+  - **Never modify the system-wide environment**: do not set/delete environment variables, modify PATH, touch the registry, or install/uninstall global packages. `pip` is only allowed with `--target .venv\Lib\site-packages` to write into the project venv (see Key gotchas below).
+  - **Never modify files outside the project directory** (`MediaConverter/`): do not write, delete, or create any file outside it (including `%LOCALAPPDATA%`, `%TEMP%`, `C:\`, etc.).
+  - **All files produced by the project must stay inside the project directory**: logs, history, caches, and temp files must land inside the project; tests must create their own temp dirs with `tempfile.TemporaryDirectory()` and clean up in `tearDown`. Note: importing `backup/converter.py` creates a log dir at `%LOCALAPPDATA%\FFmpegConverter` (legacy side effect — do not rely on it, do not extend it beyond its scope).
 - Chinese UI text throughout (buttons, labels, messages). Keep it Chinese.
 - All error handling must use specific exceptions (`OSError`, `ValueError`, `SubprocessError`), never bare `except:`.
 - FFmpeg extra args are whitelisted in `core/validators.py` `SAFE_FFMPEG_FLAGS`. Add new flags there, not inline.
