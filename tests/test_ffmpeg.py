@@ -83,6 +83,27 @@ class TestFFmpegManager(unittest.TestCase):
         self.assertIsNone(hwaccel)
 
     @patch('subprocess.run')
+    def test_verify_gpu_encoder_uses_min_128_frame(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout='')
+        mgr = FFmpegManager()
+        mgr.ffmpeg_path = '/fake/ffmpeg'
+        self.assertTrue(mgr._verify_gpu_encoder('h264_nvenc'))
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        self.assertTrue(any('color=size=256x256:rate=1:duration=1' in cmd for cmd in calls),
+                        "NVENC 要求最小帧 128x128，实测帧不得低于此值")
+
+    @patch('subprocess.run')
+    def test_verify_gpu_encoder_logs_stderr_on_failure(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout='',
+            stderr='InitializeEncoder failed: invalid param (8)'
+        )
+        mgr = FFmpegManager()
+        mgr.ffmpeg_path = '/fake/ffmpeg'
+        with self.assertLogs('MediaConverter', level='DEBUG'):
+            self.assertFalse(mgr._verify_gpu_encoder('h264_nvenc'))
+
+    @patch('subprocess.run')
     def test_detect_gpu_no_ffmpeg(self, mock_run):
         mgr = FFmpegManager()
         gpu_type, hwaccel = mgr.detect_gpu()

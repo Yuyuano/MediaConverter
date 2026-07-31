@@ -188,15 +188,22 @@ class FFmpegManager:
         return self.gpu_type, self._hwaccel
 
     def _verify_gpu_encoder(self, encoder: str) -> bool:
-        """用 1 帧实测确认编码器真正可用（无显卡时 nvenc/amf/qsv 会加载失败）。"""
+        """用 1 帧实测确认编码器真正可用（无显卡时 nvenc/amf/qsv 会加载失败）。
+
+        测试帧必须 >= 128x128：NVENC 对 H.264/HEVC/AV1 有最小帧尺寸下限，
+        64x64 会报 "Frame Dimension less than the minimum supported value"。
+        """
         try:
             r = subprocess.run(
                 [self.ffmpeg_path, '-hide_banner', '-loglevel', 'error',
-                 '-f', 'lavfi', '-i', 'color=size=64x64:rate=1:duration=1',
+                 '-f', 'lavfi', '-i', 'color=size=256x256:rate=1:duration=1',
                  '-frames:v', '1', '-c:v', encoder, '-f', 'null', '-'],
                 capture_output=True, text=True, encoding='utf-8', errors='replace',
                 timeout=10, creationflags=subprocess.CREATE_NO_WINDOW
             )
+            if r.returncode != 0:
+                err = '\n'.join((r.stderr or '').strip().splitlines()[:3])
+                logger.debug(f"GPU 编码器实测失败 {encoder}: {err}")
             return r.returncode == 0
         except (OSError, subprocess.SubprocessError):
             return False

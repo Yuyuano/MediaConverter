@@ -582,6 +582,11 @@ QStatusBar::item {{
     border: none;
 }}
 
+/* ── 状态栏主题切换按钮（BMP 符号兜底：若换回 emoji 需此字体规则） ── */
+QPushButton#themeBtn {{
+    font-family: "Segoe UI Emoji", "Microsoft YaHei", sans-serif;
+}}
+
 /* ── 消息框 ── */
 QMessageBox {{
     background-color: {dialog_bg};

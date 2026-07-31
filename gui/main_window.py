@@ -83,7 +83,8 @@ class MainWindow(QMainWindow):
             self._status_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         self.statusBar().addWidget(self._status_label, 1)
 
-        self._theme_btn = QPushButton("🌙" if self._theme_mgr and self._theme_mgr.current == 'dark' else "☀")
+        self._theme_btn = QPushButton("☾" if self._theme_mgr and self._theme_mgr.current == 'dark' else "☀")
+        self._theme_btn.setObjectName("themeBtn")
         self._theme_btn.setFixedSize(28, 28)
         self._theme_btn.setFlat(True)
         self._theme_btn.setToolTip("切换主题")
@@ -129,7 +130,7 @@ class MainWindow(QMainWindow):
     def _toggle_theme(self):
         if self._theme_mgr:
             self._theme_mgr.toggle()
-            self._theme_btn.setText("🌙" if self._theme_mgr.current == 'dark' else "☀")
+            self._theme_btn.setText("☾" if self._theme_mgr.current == 'dark' else "☀")
             # Refresh status bar inline styles with new tokens
             t = self._theme_mgr.tokens
             self._status_label.setStyleSheet(
