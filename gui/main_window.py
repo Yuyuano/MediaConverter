@@ -179,6 +179,11 @@ class MainWindow(QMainWindow):
         opts = record.get('options', {})
         if opts:
             page.param_panel.apply_options(opts)
+        out = record.get('output', '') or (opts or {}).get('output_dir', '')
+        if out:
+            out_dir = str(Path(out).parent) if os.path.isfile(out) else str(out)
+            if hasattr(page, 'combo_output'):
+                page.combo_output.setCurrentText(out_dir)
         self._set_status(f"已加载历史文件: {Path(filepath).name}")
 
     def closeEvent(self, event):

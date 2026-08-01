@@ -2,6 +2,8 @@
 
 Windows 环境的一体化媒体转换工具，基于 FFmpeg，支持视频/图片/音频格式互转。
 
+**v5.3 更新：音频编码器选择生效/历史回放补全/超时保护修复/批量模板修复/智能压缩边界/健壮性加固。**
+
 **v5.2 更新：架构重构/并发安全加固/命令行预览/历史还原参数/旋转翻转滤镜/MD3 双主题/漏洞修复。**
 
 ## 功能特性
@@ -120,6 +122,7 @@ MediaConverter/
 │   ├── progress_parser.py   # 进度行解析 + ETA 计算
 │   ├── options.py           # ConvertOptions 参数数据类（含字段白名单校验）
 │   ├── ffmpeg.py            # FFmpeg 路径查找 + GPU 检测 + SHA256 指纹校验
+│   ├── paths.py             # 运行时路径（程序目录/项目内临时目录，frozen 适配）
 │   ├── history.py           # 历史记录管理（原子写入 + frozen 打包适配）
 │   ├── queue.py             # 批量转换队列
 │   └── validators.py        # FFmpeg 参数白名单 + 路径校验 + 尺寸解析
@@ -147,7 +150,7 @@ MediaConverter/
 │   │   └── info_dialog.py   # 媒体信息（缩略图 + 详情 + 导出）
 │   ├── theme.py             # MD3 双主题管理器（亮/暗 token 系统）
 │   └── styles/material.qss  # MD3 双主题 QSS 模板（{token} 占位符渲染）
-├── tests/                   # 核心模块单元测试（263 tests，14 文件）
+├── tests/                   # 核心模块单元测试（270 tests，14 文件）
 ├── ico/                     # 应用图标
 ├── ffmpeg/                  # FFmpeg 二进制（gitignore）
 ├── build.py                 # PyInstaller 打包脚本
@@ -165,15 +168,17 @@ MediaConverter/
 - 图片处理：Lanczos 缩放、高质量压缩、GIF 调色板优化、旋转/翻转滤镜
 - 并发：每页独立 MediaConverter 实例 + ThreadPoolExecutor + `threading.Event` 取消 + `_cancel_event` TOCTOU 防护
 - 进度：实时解析 `ffmpeg stderr:time=` 输出为百分比 + `speed=` 计算 ETA
-- 安全：extra_args 白名单 + 值黑名单、SHA256 指纹校验、输出超时保护、覆盖确认弹窗
-- 批量模板：`{原名}` `{格式}` `{序号}` `{日期}` `{原路径}` 自定义文件名
-- 拼接：`-f concat` demuxer + 临时文件列表，支持 `-c copy` 无损
+- 超时：stdout 读取线程 + 队列轮询 + 截止时间检查，ffmpeg 挂起时自动终止
+- 安全：extra_args 白名单 + 值黑名单、SHA256 指纹校验、输出超时保护、覆盖确认弹窗、批量模板穿越清洗
+- 批量模板：`{原名}` `{格式}` `{序号}` `{日期}` `{原路径}` 自定义文件名（变量值单独清洗，输出始终为合法文件名）
+- 拼接：`-f concat` demuxer + 项目内临时文件列表，支持 `-c copy` 无损
+- 产物约束：日志/历史/临时文件全部落在程序目录内（`history/`、`tmp/`），不写系统 %TEMP%
 - 打包：PyInstaller（目录模式，~120MB 含 FFmpeg）
 
 ## 测试
 
 ```bash
-# 核心测试（263 tests，14 文件）
+# 核心测试（270 tests，14 文件）
 .venv\Scripts\python.exe -m unittest discover tests -v
 
 # 旧版 CLI 模块测试（19 tests，在 backup/ 目录）

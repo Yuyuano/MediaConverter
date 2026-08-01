@@ -1,16 +1,19 @@
 import os
 import json
 import re
+import time
 import tempfile
 import subprocess
 import logging
 import threading
 from pathlib import Path
+from queue import Queue, Empty
 from typing import Optional, List, Callable, Dict
 
 from .options import ConvertOptions
 from .ffmpeg import FFmpegManager
 from .history import HistoryManager
+from .paths import tmp_dir
 from .validators import validate_extra_args, validate_output_dir
 from .constants import VIDEO_EXTS, IMAGE_EXTS, AUDIO_EXTS
 from .probe import MediaProbe
@@ -199,7 +202,8 @@ class MediaConverter:
                 total_duration += info['duration']
 
         filelist = tempfile.NamedTemporaryFile(mode='w', suffix='.txt',
-                                                 delete=False, encoding='utf-8')
+                                                 delete=False, encoding='utf-8',
+                                                 dir=str(tmp_dir()))
         filelist.close()
         try:
             with open(filelist.name, 'w', encoding='utf-8') as fh:
@@ -254,7 +258,42 @@ class MediaConverter:
                 self._active_processes.add(process)
 
             error_lines = []
-            for line in process.stdout:
+
+            # 用独立读取线程消费 stdout 管道，主线程以非阻塞方式取行，
+            # 这样 ffmpeg 挂起（管道保持打开、不再输出）时超时仍能触发。
+            line_queue: Queue = Queue()
+
+            def _drain_stdout():
+                try:
+                    for line in process.stdout:
+                        line_queue.put(line)
+                except (OSError, ValueError):
+                    pass
+                finally:
+                    line_queue.put(None)
+
+            reader_thread = threading.Thread(target=_drain_stdout, daemon=True)
+            reader_thread.start()
+
+            if total_duration > 0:
+                max_wait = int(total_duration * 10 + 120)
+            else:
+                max_wait = 3600
+            deadline = time.monotonic() + max_wait
+            timed_out = False
+
+            while True:
+                try:
+                    line = line_queue.get(timeout=0.1)
+                except Empty:
+                    if process.poll() is not None:
+                        break
+                    if time.monotonic() >= deadline:
+                        timed_out = True
+                        break
+                    continue
+                if line is None:
+                    break
                 line = line.strip()
                 if not line:
                     continue
@@ -270,17 +309,14 @@ class MediaConverter:
                     error_lines.append(line)
                     self._on_log('error', line)
 
-            if total_duration > 0:
-                max_wait = int(total_duration * 10 + 120)
-            else:
-                max_wait = 3600
-            try:
-                process.wait(timeout=max_wait)
-            except subprocess.TimeoutExpired:
+            if timed_out:
                 self._on_log('error', f'转换超时 ({max_wait}s)，已终止')
                 logger.error(f"FFmpeg 执行超时 ({max_wait}s)，强制终止")
-                process.kill()
-                process.wait(timeout=5)
+                try:
+                    process.kill()
+                    process.wait(timeout=5)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
                 return False
             if process.returncode == 0:
                 try:
@@ -320,6 +356,8 @@ class MediaConverter:
                         stdout.close()
                     except (OSError, ValueError):
                         pass
+                if 'reader_thread' in locals() and reader_thread.is_alive():
+                    reader_thread.join(timeout=2)
                 with self._process_lock:
                     self._active_processes.discard(process)
 

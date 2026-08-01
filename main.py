@@ -1,6 +1,7 @@
 import sys
 import logging
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 from core.constants import APP_VERSION
 
@@ -15,13 +16,17 @@ def main():
 
     LOG_DIR = ROOT / "history"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        filename=str(LOG_DIR / 'converter.log'),
-        level=logging.DEBUG,
-        format='%(asctime)s [%(levelname)s] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        encoding='utf-8'
+    _handler = RotatingFileHandler(
+        str(LOG_DIR / 'converter.log'),
+        maxBytes=1024 * 1024, backupCount=2, encoding='utf-8'
     )
+    _handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(_handler)
     app = QApplication(sys.argv)
     app.setApplicationName("MediaConverter")
     app.setApplicationVersion(APP_VERSION)

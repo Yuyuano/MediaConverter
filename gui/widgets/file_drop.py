@@ -82,9 +82,16 @@ class FileDropWidget(QWidget):
     def dropEvent(self, event: QDropEvent):
         self._reset_drop_style()
         urls = event.mimeData().urls()
-        if urls:
-            path = urls[0].toLocalFile()
-            self.set_file(path)
+        for url in urls:
+            path = url.toLocalFile()
+            if path and Path(path).suffix.lower() in ALL_MEDIA_EXTS and os.path.isfile(path):
+                self.set_file(path)
+                return
+        for url in urls:
+            path = url.toLocalFile()
+            if path and os.path.isfile(path):
+                self.set_file(path)
+                return
 
     def _set_drop_state(self, state: str):
         """Switch drop-label visual state via dynamic property (styled in QSS)."""

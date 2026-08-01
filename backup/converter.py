@@ -28,8 +28,17 @@ except ImportError:
         RESET_ALL = DIM = BRIGHT = ''
 
 # 日志配置
+# 注意：legacy 模块，默认使用 LOCALAPPDATA；受限环境下创建失败时
+# 回退到项目内 history/ 目录（与新版应用约定一致），保证导入不抛异常。
 LOG_DIR = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))) / 'FFmpegConverter'
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    LOG_DIR = Path(__file__).resolve().parent.parent / 'history' / 'FFmpegConverter'
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        LOG_DIR = Path.home()
 logging.basicConfig(
     filename=str(LOG_DIR / 'converter.log'),
     level=logging.DEBUG,

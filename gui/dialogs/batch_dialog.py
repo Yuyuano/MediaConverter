@@ -1,5 +1,6 @@
 import os
 import copy
+import re
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -17,6 +18,30 @@ from core.constants import ALL_MEDIA_EXTS, VIDEO_EXTS, IMAGE_EXTS, AUDIO_EXTS
 from core.validators import validate_output_dir
 from gui.theme import format_log_html
 from gui.workers.convert_worker import BatchWorker
+
+
+_VIDEO_FORMATS = ["mp4", "avi", "mkv", "mov", "webm", "wmv", "gif"]
+_IMAGE_FORMATS = ["jpg", "png", "webp", "bmp"]
+_AUDIO_FORMATS = ["mp3", "wav", "aac", "flac", "ogg", "m4a"]
+_FORMATS_BY_TYPE = {'video': _VIDEO_FORMATS, 'image': _IMAGE_FORMATS, 'audio': _AUDIO_FORMATS}
+
+_INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*]')
+
+
+def _input_media_type(ext: str) -> str:
+    if ext in VIDEO_EXTS or ext == '.gif':
+        return 'video'
+    if ext in IMAGE_EXTS:
+        return 'image'
+    return 'audio'
+
+
+def _safe_name_part(s: str) -> str:
+    """把路径/名称片段清洗为合法、无穿越风险的文件名组件。"""
+    s = _INVALID_FILENAME_RE.sub('_', s)
+    s = s.replace('..', '_')
+    s = s.strip(' ._')
+    return s or 'file'
 
 
 def _unique_path(path: str) -> str:
@@ -223,9 +248,7 @@ class BatchDialog(QDialog):
             self.table.insertRow(row)
 
             fmt_combo = QComboBox()
-            fmt_combo.addItems(["mp4", "avi", "mkv", "mov", "webm", "wmv", "gif",
-                                "jpg", "png", "webp", "bmp",
-                                "mp3", "wav", "aac", "flac", "ogg", "m4a"])
+            fmt_combo.addItems(_FORMATS_BY_TYPE[_input_media_type(ext)])
             fmt_combo.setCurrentText(self._guess_default_format(ext))
             fmt_combo.setMinimumHeight(26)
             self.table.setCellWidget(row, 0, fmt_combo)
@@ -279,6 +302,9 @@ class BatchDialog(QDialog):
                 media_type = 'image'
             else:
                 media_type = 'audio'
+            if media_type != _input_media_type(p.suffix.lower()):
+                self._append_log('warning', f"跳过 {p.name}: 输出格式 {fmt} 与输入类型不匹配")
+                continue
             base_opts = self._converter.get_default_opts(fmt, media_type)
             base_opts.use_gpu = self.check_gpu.isChecked() and bool(self._converter_gpu_type)
 
@@ -336,12 +362,14 @@ class BatchDialog(QDialog):
 
     def _render_template(self, template: str, stem: str, fmt: str,
                          index: int, source_dir: str) -> str:
-        result = template.replace("{原名}", stem)
-        result = result.replace("{格式}", fmt)
+        # 先清洗模板字面量（防穿越），再替换变量；变量值各自单独清洗，
+        # 避免变量展开后再次被全局替换破坏（如 {原路径} 中的反斜杠）。
+        result = template.replace('..', '_').replace('/', '_').replace('\\', '_')
+        result = result.replace("{原名}", _safe_name_part(stem))
+        result = result.replace("{格式}", _safe_name_part(fmt))
         result = result.replace("{序号}", f"{index:03d}")
         result = result.replace("{日期}", datetime.now().strftime("%Y%m%d"))
-        result = result.replace("{原路径}", source_dir)
-        result = result.replace('..', '_').replace('/', '_').replace('\\', '_')
+        result = result.replace("{原路径}", _safe_name_part(source_dir))
         return result
 
     def _on_task_done(self, task_id, input_file, success):

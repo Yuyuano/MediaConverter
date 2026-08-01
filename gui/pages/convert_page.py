@@ -298,7 +298,10 @@ class ConvertPage(QWidget):
             QMessageBox.warning(self, "提示", "无法获取视频时长")
             return
         target_bits = int((target_mb * 8 * 1024 * 1024) / duration * 0.9)
-        opts.bitrate = f"{target_bits // 1024}k"
+        bitrate_k = max(64, target_bits // 1024)
+        opts.bitrate = f"{bitrate_k}k"
+        if bitrate_k == 64:
+            self.status_message.emit("目标大小过小，视频码率已使用下限 64k")
         opts.audio_bitrate = "128k"
         opts.preset = 'slow'
         self._start_convert(self._current_file, output, opts)

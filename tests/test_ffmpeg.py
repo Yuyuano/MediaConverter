@@ -4,12 +4,13 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from core.ffmpeg import FFmpegManager
+from core.ffmpeg import FFmpegManager, clear_gpu_cache
 
 
 class TestFFmpegManager(unittest.TestCase):
 
     def setUp(self):
+        clear_gpu_cache()
         self.mgr = FFmpegManager()
 
     def test_init_not_frozen(self):

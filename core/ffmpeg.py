@@ -11,6 +11,25 @@ logger = logging.getLogger('MediaConverter')
 
 _VERSION_RE = re.compile(r'ffmpeg version (\S+)')
 
+# 跨实例共享的 GPU 检测结果缓存（键 = ffmpeg 路径 + 文件指纹），
+# 避免每个 MediaConverter 实例 / 每个页面第一次转换都重复实测编码。
+_GPU_DETECT_CACHE: dict = {}
+
+
+def _gpu_cache_key(ffmpeg_path: Optional[str]):
+    if not ffmpeg_path:
+        return None
+    try:
+        st = os.stat(ffmpeg_path)
+        return (ffmpeg_path, st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (ffmpeg_path,)
+
+
+def clear_gpu_cache():
+    """清空共享 GPU 检测缓存（测试用）。"""
+    _GPU_DETECT_CACHE.clear()
+
 
 class FFmpegManager:
     """FFmpeg 路径查找与 GPU 检测"""
@@ -166,6 +185,10 @@ class FFmpegManager:
     def detect_gpu(self) -> Tuple[Optional[str], Optional[str]]:
         if not self.ffmpeg_path:
             return None, None
+        cache_key = _gpu_cache_key(self.ffmpeg_path)
+        if cache_key in _GPU_DETECT_CACHE:
+            self.gpu_type, self._hwaccel = _GPU_DETECT_CACHE[cache_key]
+            return self.gpu_type, self._hwaccel
         try:
             r = subprocess.run(
                 [self.ffmpeg_path, '-encoders'], capture_output=True,
@@ -185,6 +208,7 @@ class FFmpegManager:
                     break
         except (OSError, subprocess.SubprocessError):
             pass
+        _GPU_DETECT_CACHE[cache_key] = (self.gpu_type, self._hwaccel)
         return self.gpu_type, self._hwaccel
 
     def _verify_gpu_encoder(self, encoder: str) -> bool:

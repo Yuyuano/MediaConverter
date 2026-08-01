@@ -886,6 +886,24 @@ class ParamPanel(QWidget):
             duration = options.get('trim_duration')
             if duration:
                 self.input_duration.setText(str(duration))
+            if start_time or duration:
+                self.check_trim.setChecked(True)
+
+            sc = options.get('stream_copy')
+            if sc is not None:
+                self.check_stream_copy.setChecked(bool(sc))
+            ra = options.get('remove_audio')
+            if ra is not None:
+                self.check_remove_audio.setChecked(bool(ra))
+            repl = options.get('replace_audio_file')
+            if repl:
+                self._replace_audio_path = repl
+                self.label_replace_audio.setText(Path(repl).name)
+            rot = options.get('rotate')
+            self.btn_rot90.setChecked(rot == 90)
+            self.btn_rot270.setChecked(rot == 270)
+            self.btn_flip_h.setChecked(bool(options.get('flip_h')))
+            self.btn_flip_v.setChecked(bool(options.get('flip_v')))
         elif self._media_type == 'image':
             q = options.get('quality')
             if q is not None:
@@ -897,16 +915,16 @@ class ParamPanel(QWidget):
             if h:
                 self.spin_img_height.setValue(h)
         elif self._media_type == 'audio':
-            codec = options.get('audio_codec')
+            codec = options.get('audio_codec') or options.get('codec')
             if codec and hasattr(self, 'combo_audio_only_codec'):
                 idx = self.combo_audio_only_codec.findData(codec)
                 if idx >= 0:
                     self.combo_audio_only_codec.setCurrentIndex(idx)
             br = options.get('audio_bitrate')
-            if br and hasattr(self, 'combo_audio_bitrate'):
-                idx = self.combo_audio_bitrate.findText(br)
+            if br and hasattr(self, 'combo_audio_only_bitrate'):
+                idx = self.combo_audio_only_bitrate.findText(br)
                 if idx >= 0:
-                    self.combo_audio_bitrate.setCurrentIndex(idx)
+                    self.combo_audio_only_bitrate.setCurrentIndex(idx)
 
     def get_options(self) -> ConvertOptions:
         opts = ConvertOptions()
@@ -998,7 +1016,7 @@ class ParamPanel(QWidget):
         elif self._media_type == 'audio':
             ac = self.combo_audio_only_codec.currentData()
             if ac:
-                opts.codec = ac
+                opts.audio_codec = ac
             ab = self.combo_audio_only_bitrate.currentText()
             if ab and ab != '自动':
                 opts.audio_bitrate = ab

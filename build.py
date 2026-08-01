@@ -18,6 +18,9 @@ AUTO_DOWNLOAD = os.environ.get('FFMPEG_AUTO_DOWNLOAD', 'false').lower() == 'true
 SKIP_CONFIRM = os.environ.get('FFMPEG_SKIP_CONFIRM', 'false').lower() == 'true'
 FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
+# 所有路径基于脚本所在目录，不依赖 CWD
+ROOT = Path(__file__).resolve().parent
+
 
 def download_ffmpeg(target_dir: Path):
     print("[*] 正在下载 FFmpeg...")
@@ -81,7 +84,7 @@ def download_ffmpeg(target_dir: Path):
 
 
 def prepare_ffmpeg():
-    ffmpeg_dir = Path("ffmpeg")
+    ffmpeg_dir = ROOT / "ffmpeg"
     ffmpeg_dir.mkdir(exist_ok=True)
 
     if (ffmpeg_dir / "ffmpeg.exe").exists() and (ffmpeg_dir / "ffprobe.exe").exists():
@@ -120,7 +123,7 @@ def prepare_ffmpeg():
 
 def collect_binaries():
     binaries = []
-    ffmpeg_dir = Path("ffmpeg")
+    ffmpeg_dir = ROOT / "ffmpeg"
     if not ffmpeg_dir.exists():
         return binaries
     print("\n[*] 扫描打包文件:")
@@ -150,7 +153,7 @@ def build():
 
     binaries = collect_binaries()
 
-    icon_path = Path("icon.ico")
+    icon_path = ROOT / "icon.ico"
     icon_arg = ['--icon', str(icon_path)] if icon_path.exists() else []
 
     args = [
@@ -183,11 +186,14 @@ def build():
             print(f"\n[!] 打包错误: {e}")
             return
 
-    dist_dir = Path("dist") / "MediaConverter"
+    dist_dir = ROOT / "dist" / "MediaConverter"
     exe_path = dist_dir / "MediaConverter.exe"
     if exe_path.exists():
-        final_dir = Path("MediaConverter")
+        final_dir = ROOT / "MediaConverter"
         if final_dir.exists():
+            if final_dir.resolve() == ROOT.resolve() or ROOT.resolve() not in final_dir.resolve().parents:
+                print("[!] 拒绝操作非构建输出目录，已跳过复制")
+                return
             shutil.rmtree(final_dir)
         shutil.copytree(dist_dir, final_dir)
 

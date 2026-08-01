@@ -61,9 +61,53 @@ class TestParamPanel(unittest.TestCase):
         idx = panel.combo_audio_only_codec.findData('aac')
         self.assertGreaterEqual(idx, 0)
         self.assertEqual(panel.combo_audio_only_codec.currentIndex(), idx)
-        idx2 = panel.combo_audio_bitrate.findText('192k')
+        idx2 = panel.combo_audio_only_bitrate.findText('192k')
         self.assertGreaterEqual(idx2, 0)
-        self.assertEqual(panel.combo_audio_bitrate.currentIndex(), idx2)
+        self.assertEqual(panel.combo_audio_only_bitrate.currentIndex(), idx2)
+
+    def test_apply_options_audio_legacy_codec_key(self):
+        """旧历史记录把音频编码器存进 codec 字段，回放需兼容。"""
+        panel = self._panel('audio')
+        panel.apply_options({'codec': 'flac', 'audio_bitrate': '128k'})
+        idx = panel.combo_audio_only_codec.findData('flac')
+        self.assertGreaterEqual(idx, 0)
+        self.assertEqual(panel.combo_audio_only_codec.currentIndex(), idx)
+        idx2 = panel.combo_audio_only_bitrate.findText('128k')
+        self.assertGreaterEqual(idx2, 0)
+        self.assertEqual(panel.combo_audio_only_bitrate.currentIndex(), idx2)
+
+    def test_apply_options_video_trim_checks_checkbox(self):
+        """回放裁剪参数时必须勾选裁剪开关，否则输入框禁用、重新转换时参数丢失。"""
+        panel = self._panel('video')
+        panel.apply_options({'start_time': '00:01:00', 'trim_duration': '00:00:30'})
+        self.assertTrue(panel.check_trim.isChecked())
+        self.assertTrue(panel.input_start.isEnabled())
+        self.assertTrue(panel.input_duration.isEnabled())
+
+    def test_apply_options_video_stream_copy_remove_audio(self):
+        panel = self._panel('video')
+        panel.apply_options({'stream_copy': True, 'remove_audio': True})
+        self.assertTrue(panel.check_stream_copy.isChecked())
+        self.assertTrue(panel.check_remove_audio.isChecked())
+
+    def test_apply_options_video_rotate_flip_replace_audio(self):
+        panel = self._panel('video')
+        panel.apply_options({'rotate': 270, 'flip_h': True, 'flip_v': True})
+        self.assertTrue(panel.btn_rot270.isChecked())
+        self.assertFalse(panel.btn_rot90.isChecked())
+        self.assertTrue(panel.btn_flip_h.isChecked())
+        self.assertTrue(panel.btn_flip_v.isChecked())
+
+    def test_get_options_audio_uses_audio_codec_field(self):
+        """音频页 get_options 必须写入 audio_codec 而非 codec（回归：编码器被忽略）。"""
+        panel = self._panel('audio')
+        panel.combo_audio_only_codec.setCurrentIndex(
+            panel.combo_audio_only_codec.findData('flac'))
+        panel.combo_audio_only_bitrate.setCurrentText('256k')
+        opts = panel.get_options()
+        self.assertEqual(opts.audio_codec, 'flac')
+        self.assertIsNone(opts.codec)
+        self.assertEqual(opts.audio_bitrate, '256k')
 
     def test_apply_options_empty(self):
         panel = self._panel('video')

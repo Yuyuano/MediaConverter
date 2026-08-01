@@ -2,6 +2,7 @@ import unittest
 import subprocess
 import sys
 from pathlib import Path
+from queue import Empty
 from unittest.mock import patch, MagicMock, PropertyMock
 
 from core.converter import MediaConverter
@@ -420,16 +421,24 @@ class TestMediaConverterRunFfmpeg(unittest.TestCase):
 
     @patch('subprocess.Popen')
     @patch('core.converter.MediaConverter.get_duration', return_value=60.0)
-    def test_run_ffmpeg_timeout_kills_process(self, mock_dur, mock_popen):
+    @patch('queue.Queue.get', side_effect=Empty())
+    def test_run_ffmpeg_timeout_kills_hung_process(self, mock_qget, mock_dur, mock_popen):
+        """ffmpeg 挂起且输出管道不关闭时，超时也必须触发（读循环不能无限阻塞）。
+
+        模拟方式：Queue.get 永远抛 Empty（等价于管道永远不出行、进程不退出），
+        stdout 用空迭代器让读取线程立即结束，避免测试自身死循环或悬挂线程。
+        """
         mock_proc = MagicMock()
         mock_proc.stdout = iter([])
-        mock_proc.wait.side_effect = subprocess.TimeoutExpired('ffmpeg', 60)
+        mock_proc.poll.return_value = None     # 进程仍在运行
+        mock_proc.wait.return_value = None
         mock_proc.returncode = 1
-        mock_proc.poll.return_value = 1
         mock_popen.return_value = mock_proc
 
-        cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
-        result = self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
+        mono_vals = iter([100.0, 100.0, 100.0, 2000.0])
+        with patch('core.converter.time.monotonic', side_effect=lambda: next(mono_vals)):
+            cmd = ['/fake/ffmpeg', '-y', '-i', 'in.mp4', 'out.mp4']
+            result = self.conv._run_ffmpeg(cmd, 'in.mp4', 'out.mp4', '.mp4', ConvertOptions())
         self.assertFalse(result)
         mock_proc.kill.assert_called_once()
 

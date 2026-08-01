@@ -275,8 +275,10 @@ class ThemeManager:
         try:
             if self._pref_path.exists():
                 data = json.loads(self._pref_path.read_text(encoding='utf-8'))
-                return data.get('theme', 'light')
-        except (json.JSONDecodeError, OSError):
+                name = data.get('theme', 'dark')
+                if name in self.THEMES:
+                    return name
+        except (json.JSONDecodeError, OSError, TypeError, AttributeError):
             pass
         return 'dark'
 

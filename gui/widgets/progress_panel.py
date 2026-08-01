@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QProgressBar, QTextEdit, QPushButton, QLabel
 from PyQt6.QtCore import pyqtSignal, Qt, QPropertyAnimation, QEasingCurve
+import html
 
 from gui.theme import format_log_html
 
@@ -99,6 +100,7 @@ class ProgressPanel(QWidget):
         self._append_html(format_log_html(level, message))
 
     def append_progress(self, message: str):
+        escaped = html.escape(message)
         doc = self.log_view.document()
         block = doc.lastBlock()
         text = block.text()
@@ -107,9 +109,9 @@ class ProgressPanel(QWidget):
             cursor.movePosition(cursor.MoveOperation.End)
             cursor.select(cursor.SelectionType.BlockUnderCursor)
             cursor.removeSelectedText()
-            cursor.insertHtml(f'  <span style="color:#a6adc8">{message}</span>')
+            cursor.insertHtml(f'  <span style="color:#a6adc8">{escaped}</span>')
         else:
-            self._append_html(f'  <span style="color:#a6adc8">{message}</span>')
+            self._append_html(f'  <span style="color:#a6adc8">{escaped}</span>')
 
     def set_eta(self, eta_text: str):
         self.label_eta.setText(eta_text)

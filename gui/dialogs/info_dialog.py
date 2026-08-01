@@ -123,19 +123,34 @@ class InfoDialog(QDialog):
         self._thumb_worker.start()
 
     def closeEvent(self, event):
-        if self._info_worker and self._info_worker.isRunning():
-            self._info_worker.requestInterruption()
-            if not self._info_worker.wait(2000):
-                logger.warning("InfoWorker 未及时退出，使用 terminate 兜底")
-                self._info_worker.terminate()
-                self._info_worker.wait(500)
-        if self._thumb_worker and self._thumb_worker.isRunning():
-            self._thumb_worker.requestInterruption()
-            if not self._thumb_worker.wait(2000):
-                logger.warning("ThumbnailWorker 未及时退出，使用 terminate 兜底")
-                self._thumb_worker.terminate()
-                self._thumb_worker.wait(500)
+        # 绝不 terminate()（可能残留锁/悬挂状态）：先断开信号再请求中断，
+        # 超时未退出的 worker 保留引用转后台，等它自然跑完（ffprobe 自带超时）。
+        for attr in ('_info_worker', '_thumb_worker'):
+            worker = getattr(self, attr, None)
+            self._shutdown_worker(worker, attr.lstrip('_'))
+            setattr(self, attr, None)
         event.accept()
+
+    def _shutdown_worker(self, worker, name: str):
+        if worker is None:
+            return
+        try:
+            for sig in ('info_ready', 'thumb_ready'):
+                try:
+                    getattr(worker, sig).disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            if worker.isRunning():
+                worker.requestInterruption()
+                if not worker.wait(2000):
+                    logger.warning(f"{name} 未在 2s 内退出，转后台等待完成")
+                    worker.finished.connect(worker.deleteLater)
+                else:
+                    worker.deleteLater()
+            else:
+                worker.deleteLater()
+        except RuntimeError:
+            pass
 
     def _on_thumb_ready(self, thumb_path: str):
         pixmap = QPixmap(thumb_path)
